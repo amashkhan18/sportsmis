@@ -1,0 +1,21 @@
+{
+  "name": "HPCL Tournament MIS",
+  "short_name": "HPCL Sports",
+  "start_url": "/sportsMIS/",
+  "display": "standalone",
+  "background_color": "#050b14",
+  "theme_color": "#003366",
+  "description": "Offline-first PWA for HPCL 20th All India Tournament Scoring",
+  "icons": [
+    {
+      "src": "https://upload.wikimedia.org/wikipedia/en/thumb/9/90/Hindustan_Petroleum_Logo.svg/192px-Hindustan_Petroleum_Logo.svg.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://upload.wikimedia.org/wikipedia/en/thumb/9/90/Hindustan_Petroleum_Logo.svg/512px-Hindustan_Petroleum_Logo.svg.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

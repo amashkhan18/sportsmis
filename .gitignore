@@ -1,0 +1,26 @@
+# Deployment archives
+*.zip
+sportsmis_deploy.zip
+
+# Temporary test & migration scratch scripts
+scratch/
+
+# IDE / Editor configuration
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# OS temporary metadata
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
+
+# Server and PHP logs
+error_log
+*.log
+
+# Environment files (if used)
+.env
+.env.local

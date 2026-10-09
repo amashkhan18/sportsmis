@@ -1,0 +1,299 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap');
+
+body {
+    font-family: 'Outfit', sans-serif;
+    background-color: #050b14;
+    /* Deep dark blue */
+    color: #ffffff;
+    overflow-x: hidden;
+}
+
+.navbar-custom {
+    background: rgba(5, 11, 20, 0.9) !important;
+    backdrop-filter: blur(15px);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    padding: 1rem 0;
+}
+
+.navbar-brand {
+    font-weight: 800;
+    letter-spacing: 1px;
+}
+
+.nav-link {
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.9rem;
+    letter-spacing: 0.5px;
+    transition: color 0.3s ease;
+}
+
+.nav-link:hover {
+    color: #a8c0ff !important;
+}
+
+.hero-section {
+    position: relative;
+    height: 75vh;
+    min-height: 650px;
+    /* High-impact sports illustration background */
+    background: url('../../images/hero_banner.jpg?v=2') no-repeat center top;
+    background-size: cover;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    margin-top: 76px;
+    /* Offset for fixed navbar */
+}
+
+.hero-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    /* Subtle radial and linear gradient that keeps the side athletes and bottom architecture visible while maximizing text legibility */
+    background: radial-gradient(circle at center, rgba(5, 11, 20, 0.25) 0%, rgba(5, 11, 20, 0.55) 70%, rgba(5, 11, 20, 0.85) 100%),
+                linear-gradient(to bottom, rgba(5, 11, 20, 0.2) 0%, rgba(5, 11, 20, 0.1) 50%, rgba(5, 11, 20, 0.9) 100%);
+}
+
+.hero-content {
+    position: relative;
+    z-index: 10;
+    padding: 2rem;
+    animation: fadeInUp 1s ease-out forwards;
+}
+
+.hero-title {
+    font-weight: 800;
+    font-size: 4rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    text-shadow: 0 10px 30px rgba(0, 0, 0, 0.8);
+    background: linear-gradient(to right, #ffffff, #a8c0ff);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    line-height: 1.2;
+}
+
+.hero-subtitle {
+    font-weight: 400;
+    font-size: 1.5rem;
+    color: #e0e0e0;
+    margin-top: 1rem;
+    text-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+}
+
+.hero-date {
+    display: inline-block;
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+    padding: 0.5rem 1.5rem;
+    border-radius: 30px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    margin-top: 1.5rem;
+    font-weight: 600;
+    letter-spacing: 1px;
+}
+
+/* Glassmorphism Cards */
+.features-section {
+    position: relative;
+    z-index: 20;
+    margin-top: -80px;
+    padding-bottom: 5rem;
+}
+
+.glass-card {
+    background: rgba(255, 255, 255, 0.03);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 20px;
+    padding: 2.5rem;
+    transition: transform 0.4s ease, box-shadow 0.4s ease, border-color 0.4s ease;
+    height: 100%;
+    text-align: center;
+    box-shadow: 0 15px 35px rgba(0, 0, 0, 0.2);
+}
+
+.glass-card:hover {
+    transform: translateY(-15px);
+    box-shadow: 0 20px 40px rgba(0, 123, 255, 0.15);
+    border-color: rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.glass-card .icon {
+    font-size: 3.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.icon-live {
+    background: linear-gradient(45deg, #ff416c, #ff4b2b);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.icon-trophy {
+    background: linear-gradient(45deg, #fceabb, #f8b500);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.icon-social {
+    background: linear-gradient(45deg, #00b4db, #0083b0);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.glass-card h4 {
+    font-weight: 700;
+    margin-bottom: 1rem;
+    color: #ffffff;
+}
+
+.glass-card p {
+    color: #a0aab5;
+    font-size: 1rem;
+    line-height: 1.6;
+    margin-bottom: 2rem;
+}
+
+.custom-btn {
+    border-radius: 30px;
+    padding: 0.75rem 2rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    transition: all 0.3s ease;
+    border: none;
+    display: inline-block;
+    text-decoration: none;
+}
+
+.btn-primary-custom {
+    background: linear-gradient(45deg, #003366, #00509e);
+    color: white;
+    box-shadow: 0 4px 15px rgba(0, 80, 158, 0.4);
+}
+
+.btn-primary-custom:hover {
+    background: linear-gradient(45deg, #00509e, #007bff);
+    color: white;
+    transform: scale(1.05);
+}
+
+.btn-outline-custom {
+    background: transparent;
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    color: white;
+}
+
+.btn-outline-custom:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.4);
+    color: white;
+    transform: scale(1.05);
+}
+
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(40px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .hero-title {
+        font-size: 2.5rem;
+    }
+
+    .hero-section {
+        min-height: 500px;
+        height: 60vh;
+    }
+
+    .features-section {
+        margin-top: -40px;
+    }
+}
+
+/* Light Mode Theme */
+body.light-mode {
+    background-color: #f0f4f8;
+    color: #1a202c;
+}
+
+body.light-mode .navbar-custom {
+    background: rgba(255, 255, 255, 0.9) !important;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+body.light-mode .navbar-brand span,
+body.light-mode .nav-link {
+    color: #003366 !important;
+}
+
+body.light-mode .nav-link:hover {
+    color: #007bff !important;
+}
+
+body.light-mode .hero-overlay {
+    background: linear-gradient(to bottom, rgba(255, 255, 255, 0.4) 0%, rgba(240, 244, 248, 1) 100%);
+}
+
+body.light-mode .hero-title {
+    background: linear-gradient(to right, #003366, #00509e);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    text-shadow: none;
+}
+
+body.light-mode .hero-subtitle {
+    color: #4a5568;
+    text-shadow: none;
+}
+
+body.light-mode .hero-date {
+    background: rgba(0, 0, 0, 0.05);
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    color: #2d3748;
+}
+
+body.light-mode .glass-card {
+    background: rgba(255, 255, 255, 0.9);
+    border: 1px solid rgba(0, 0, 0, 0.05);
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+}
+
+body.light-mode .glass-card:hover {
+    background: #ffffff;
+    box-shadow: 0 15px 35px rgba(0, 123, 255, 0.1);
+    border-color: rgba(0, 123, 255, 0.2);
+}
+
+body.light-mode .glass-card h4 {
+    color: #003366;
+}
+
+body.light-mode .glass-card p {
+    color: #4a5568;
+}
+
+body.light-mode .btn-outline-custom {
+    border-color: #003366;
+    color: #003366;
+}
+
+body.light-mode .btn-outline-custom:hover {
+    background: #003366;
+    color: #ffffff;
+}
