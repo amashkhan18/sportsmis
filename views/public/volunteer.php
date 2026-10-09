@@ -1,4 +1,7 @@
 <?php
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
 // Volunteer / Court-Side Scorer PWA Interface
 // Responsive, Mobile-First Web Application (FR-14, FR-16, FR-17, FR-18)
 ?>
@@ -103,6 +106,102 @@
             border: 2px solid #ef4444 !important;
             box-shadow: 0 4px 15px rgba(239, 68, 68, 0.15) !important;
         }
+
+        /* Bridge Matrix & Console Styles */
+        .bridge-matrix-tbl {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+            min-width: 800px;
+        }
+        .bridge-matrix-tbl th {
+            background: #1e293b;
+            color: #f8fafc;
+            text-align: center;
+            padding: 8px 6px;
+            border: 1px solid #cbd5e1;
+            font-size: 0.78rem;
+            text-transform: uppercase;
+        }
+        .bridge-matrix-tbl td {
+            padding: 6px 6px;
+            border: 1px solid #cbd5e1;
+            vertical-align: middle;
+            text-align: center;
+        }
+        .bridge-matrix-tbl tr:nth-child(even) td {
+            background: #f8fafc;
+        }
+        .bridge-cell-split {
+            position: relative;
+            width: 74px;
+            height: 48px;
+            background: #ffffff;
+            border: 1px solid #94a3b8;
+            border-radius: 4px;
+            margin: 0 auto;
+            overflow: hidden;
+        }
+        .bridge-cell-split::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(to bottom right, transparent calc(50% - 1px), #94a3b8 50%, transparent calc(50% + 1px));
+            pointer-events: none;
+        }
+        .bridge-cell-cum-vp {
+            position: absolute;
+            top: 2px;
+            left: 4px;
+            font-weight: 800;
+            font-size: 0.85rem;
+            color: #0284c7;
+            font-family: monospace;
+            line-height: 1;
+        }
+        .bridge-cell-opp-no {
+            position: absolute;
+            bottom: 2px;
+            right: 4px;
+            font-weight: 800;
+            font-size: 0.75rem;
+            color: #b45309;
+            background: #fef3c7;
+            padding: 1px 4px;
+            border-radius: 3px;
+            line-height: 1;
+            border: 1px solid #fde68a;
+        }
+        .bridge-cell-empty {
+            position: relative;
+            width: 74px;
+            height: 48px;
+            background: #f1f5f9;
+            border: 1px dashed #cbd5e1;
+            border-radius: 4px;
+            margin: 0 auto;
+        }
+        .bridge-cell-empty::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(to bottom right, transparent calc(50% - 1px), #cbd5e1 50%, transparent calc(50% + 1px));
+        }
+        .bridge-table-card {
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            background: #ffffff;
+            transition: box-shadow 0.2s ease;
+        }
+        .bridge-table-card:hover {
+            box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+        }
     </style>
 </head>
 <body>
@@ -117,16 +216,40 @@
                     <small class="text-white-50" style="font-size: 0.75rem;">Digital Scorecards &bull; Live Updates &bull; Offline Sync</small>
                 </div>
             </div>
-            <div>
+            <div class="d-flex align-items-center gap-2">
                 <span id="networkBadge" class="badge bg-success p-2">
                     <i class="fas fa-wifi me-1"></i> <span id="networkText">Online</span>
                 </span>
+
+                <?php if (isset($_SESSION['user_id'])): ?>
+                    <span class="badge bg-white bg-opacity-10 text-white p-2 d-none d-md-inline-block border border-white border-opacity-25" style="font-size: 0.8rem;">
+                        <i class="fas fa-user-circle text-warning me-1"></i> <?= htmlspecialchars($_SESSION['full_name'] ?? $_SESSION['username'] ?? 'Scorer') ?>
+                        <span class="badge bg-success ms-1" style="font-size: 0.7rem;">Volunteer</span>
+                    </span>
+                    <a href="<?= BASE_URL ?>/admin/logout" class="btn btn-danger btn-sm fw-bold px-3 py-1 shadow-sm" title="Log out from scoring session">
+                        <i class="fas fa-sign-out-alt me-1"></i> Logout
+                    </a>
+                <?php else: ?>
+                    <a href="<?= BASE_URL ?>/admin/login" class="btn btn-outline-light btn-sm fw-bold px-3 py-1 shadow-sm">
+                        <i class="fas fa-sign-in-alt me-1"></i> Login
+                    </a>
+                <?php endif; ?>
             </div>
         </div>
     </header>
 
     <!-- Main App Container -->
     <main class="container">
+
+        <!-- Flash error notification if redirected from restricted pages -->
+        <?php if (!empty($_SESSION['flash_err'])): ?>
+            <div class="alert alert-danger alert-dismissible fade show py-2 mb-3 shadow-sm d-flex align-items-center" role="alert">
+                <i class="fas fa-shield-alt text-danger fs-5 me-2"></i>
+                <div class="small fw-semibold"><?= htmlspecialchars($_SESSION['flash_err']) ?></div>
+                <button type="button" class="btn-close ms-auto p-2" data-bs-dismiss="alert"></button>
+            </div>
+            <?php unset($_SESSION['flash_err']); ?>
+        <?php endif; ?>
 
         <!-- Offline notice / Queue alert -->
         <div id="offlineAlert" class="alert alert-warning py-2 mb-3 d-none align-items-center shadow-sm" role="alert">
@@ -657,6 +780,9 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         const API_URL = '<?= BASE_URL ?>/api/matches';
+        const BRIDGE_API_URL = '<?= BASE_URL ?>/api/bridge_scores.php';
+        let bridgeData = null;
+        let activeBridgeRound = 1;
         const ZONES = ['VR', 'NC', 'MP', 'PH', 'SZ', 'WZ', 'NZ', 'MR', 'NW', 'SC', 'EZ', 'HB'];
         let localMatches = JSON.parse(localStorage.getItem('pwa_matches')) || [];
         let pendingSync = JSON.parse(localStorage.getItem('pwa_pending_sync')) || [];
@@ -721,6 +847,11 @@
             container.innerHTML = '';
             
             const sportFilter = document.getElementById('sportFilter').value;
+
+            if (sportFilter === 'bridge') {
+                renderBridgeRoundScoring(container);
+                return;
+            }
 
             // Count for tabs
             const activeMatches = localMatches.filter(m => m.status === 'in_progress' || m.status === 'scheduled');
@@ -1438,7 +1569,410 @@
             checkPendingSync();
         }
 
+        // ==========================================
+        // BRIDGE TOURNAMENT ROUND SCORING SYSTEM
+        // ==========================================
+        async function fetchBridgeData(force = false) {
+            if (!force && bridgeData) return bridgeData;
+            const res = await fetch(BRIDGE_API_URL);
+            bridgeData = await res.json();
+            return bridgeData;
+        }
+
+        async function refreshBridgeScores() {
+            const statusMsg = document.getElementById('syncStatusMsg');
+            statusMsg.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Refreshing Bridge tournament data...';
+            await fetchBridgeData(true);
+            statusMsg.innerHTML = '<i class="fas fa-check-circle text-success me-1"></i> Bridge data up to date.';
+            const container = document.getElementById('matchesContainer');
+            if (document.getElementById('sportFilter').value === 'bridge') {
+                renderBridgeRoundScoring(container);
+            }
+        }
+
+        function setBridgeRound(roundNo) {
+            activeBridgeRound = roundNo;
+            const container = document.getElementById('matchesContainer');
+            renderBridgeRoundScoring(container);
+        }
+
+        function getCanonicalTeamOptions(selectedId, selectedNum) {
+            if (!bridgeData || !bridgeData.matrix) return '';
+            const sorted = [...bridgeData.matrix].sort((a, b) => a.team_no - b.team_no);
+            return sorted.map(t => {
+                const isSel = (selectedId && t.team_id == selectedId) || (selectedNum && t.team_no == selectedNum);
+                return `<option value="${t.team_id || ''}" data-team-no="${t.team_no}" ${isSel ? 'selected' : ''}>#${t.team_no} ${t.short_code} (${t.name})</option>`;
+            }).join('');
+        }
+
+        function autoBalanceBridgeVp(tableNo, changedTeam) {
+            const vp1Input = document.getElementById(`br_vp1_${tableNo}`);
+            const vp2Input = document.getElementById(`br_vp2_${tableNo}`);
+            const sumEl = document.getElementById(`br_sum_${tableNo}`);
+
+            if (!vp1Input || !vp2Input) return;
+
+            if (changedTeam === 1) {
+                const val1 = parseFloat(vp1Input.value);
+                if (!isNaN(val1) && val1 >= 0 && val1 <= 20) {
+                    const val2 = Math.max(0, Math.min(20, (20 - val1))).toFixed(2);
+                    vp2Input.value = val2;
+                }
+            } else if (changedTeam === 2) {
+                const val2 = parseFloat(vp2Input.value);
+                if (!isNaN(val2) && val2 >= 0 && val2 <= 20) {
+                    const val1 = Math.max(0, Math.min(20, (20 - val2))).toFixed(2);
+                    vp1Input.value = val1;
+                }
+            }
+
+            const current1 = parseFloat(vp1Input.value) || 0;
+            const current2 = parseFloat(vp2Input.value) || 0;
+            const currentSum = (current1 + current2).toFixed(2);
+            if (sumEl) {
+                sumEl.innerHTML = `Sum: ${currentSum} ${currentSum == '20.00' ? '<span class="text-success"><i class="fas fa-check"></i></span>' : '<span class="text-danger"><i class="fas fa-exclamation-triangle"></i></span>'}`;
+            }
+        }
+
+        async function submitBridgeRound() {
+            const btn = document.getElementById('btnSaveBridgeRound');
+            const originalText = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Saving Round Scores...';
+
+            const tablesData = [];
+            for (let t = 1; t <= 5; t++) {
+                const t1Select = document.getElementById(`br_t1_${t}`);
+                const t2Select = document.getElementById(`br_t2_${t}`);
+                const vp1Input = document.getElementById(`br_vp1_${t}`);
+                const vp2Input = document.getElementById(`br_vp2_${t}`);
+                const imp1Input = document.getElementById(`br_imp1_${t}`);
+                const imp2Input = document.getElementById(`br_imp2_${t}`);
+                const statusSelect = document.getElementById(`br_status_${t}`);
+                const matchIdInput = document.getElementById(`br_match_id_${t}`);
+
+                const team1Id = t1Select ? t1Select.value : '';
+                const team2Id = t2Select ? t2Select.value : '';
+                const vp1 = vp1Input && vp1Input.value !== '' ? parseFloat(vp1Input.value) : null;
+                const vp2 = vp2Input && vp2Input.value !== '' ? parseFloat(vp2Input.value) : null;
+                const imp1 = imp1Input ? parseInt(imp1Input.value || 0, 10) : 0;
+                const imp2 = imp2Input ? parseInt(imp2Input.value || 0, 10) : 0;
+                const status = statusSelect ? statusSelect.value : 'scheduled';
+                const matchId = matchIdInput ? matchIdInput.value : '';
+
+                tablesData.push({
+                    table_no: t,
+                    match_id: matchId,
+                    team1_id: team1Id,
+                    team2_id: team2Id,
+                    vps_a: vp1,
+                    vps_b: vp2,
+                    imps_a: imp1,
+                    imps_b: imp2,
+                    status: status
+                });
+            }
+
+            try {
+                const payload = {
+                    round_no: activeBridgeRound,
+                    tables: tablesData
+                };
+
+                const res = await fetch(BRIDGE_API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const result = await res.json();
+
+                if (result.status === 'success') {
+                    bridgeData = result; // update cached data
+                    const statusMsg = document.getElementById('syncStatusMsg');
+                    statusMsg.innerHTML = `<i class="fas fa-check-circle text-success me-1"></i> ${result.message}`;
+                    alert(`✅ Round ${activeBridgeRound} scores saved successfully! Standings and broadcast updated.`);
+                    renderBridgeRoundScoring(document.getElementById('matchesContainer'));
+                } else {
+                    alert('⚠️ Error saving round: ' + (result.message || 'Check inputs'));
+                }
+            } catch (err) {
+                console.error('Save failed', err);
+                alert('❌ Failed to save round scores. Please check internet connection.');
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = originalText;
+                }
+            }
+        }
+
+        async function renderBridgeRoundScoring(container) {
+            container.innerHTML = `
+                <div class="col-12 text-center py-5">
+                    <div class="spinner-border text-primary" role="status"></div>
+                    <p class="text-muted mt-2">Loading Bridge Tournament Console & Matrix...</p>
+                </div>
+            `;
+
+            try {
+                await fetchBridgeData();
+            } catch (e) {
+                console.error(e);
+                container.innerHTML = `
+                    <div class="col-12">
+                        <div class="alert alert-danger text-center">
+                            <i class="fas fa-exclamation-circle fa-2x mb-2 d-block"></i>
+                            Failed to connect to Bridge scoring service.
+                        </div>
+                    </div>`;
+                return;
+            }
+
+            const rRomans = { 1: 'R-I', 2: 'R-II', 3: 'R-III', 4: 'R-IV', 5: 'R-V' };
+            const fixtures = (bridgeData.fixtures && bridgeData.fixtures[activeBridgeRound]) ? bridgeData.fixtures[activeBridgeRound] : [];
+            const matrix = bridgeData.matrix || [];
+
+            let html = `
+            <div class="col-12">
+                <!-- Header Banner -->
+                <div class="card shadow-sm border-0 mb-3" style="border-radius: 12px; background: linear-gradient(135deg, #1e293b, #0f172a); color: #fff;">
+                    <div class="card-body p-3 d-flex flex-wrap justify-content-between align-items-center gap-2">
+                        <div>
+                            <span class="badge bg-warning text-dark px-2 py-1 mb-1 fw-bold">Bridge Scoring Console</span>
+                            <h5 class="fw-bold mb-0 text-white"><i class="fas fa-clone text-info me-2"></i> HPCL Inter Unit Tournament 2026 - Round-Wise Sheet</h5>
+                            <small class="text-white-50">Continuous 20-VP Scale &bull; Auto-computes match VP balance (VP A + VP B = 20.00)</small>
+                        </div>
+                        <div class="d-flex gap-2">
+                            <a href="<?= BASE_URL ?>/bridge" target="_blank" class="btn btn-sm btn-outline-info fw-bold">
+                                <i class="fas fa-external-link-alt me-1"></i> Public Scoreboard
+                            </a>
+                            <button class="btn btn-sm btn-light fw-bold" onclick="refreshBridgeScores()">
+                                <i class="fas fa-sync-alt me-1"></i> Refresh
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Round Tabs -->
+                <div class="card shadow-sm border-0 mb-3" style="border-radius: 10px;">
+                    <div class="card-body p-2 d-flex flex-wrap justify-content-between align-items-center gap-2">
+                        <div class="btn-group btn-group-sm flex-wrap" role="group">
+            `;
+
+            for (let r = 1; r <= 5; r++) {
+                const fixes = (bridgeData.fixtures && bridgeData.fixtures[r]) ? bridgeData.fixtures[r] : [];
+                const isDone = fixes.length > 0 && fixes.every(f => f.status === 'completed');
+                const isActive = (r === activeBridgeRound);
+
+                html += `
+                    <button type="button" class="btn ${isActive ? 'btn-primary active fw-bold' : (isDone ? 'btn-outline-success' : 'btn-outline-secondary')} px-3 py-2" onclick="setBridgeRound(${r})">
+                        ${rRomans[r]} ${isDone ? '<i class="fas fa-check ms-1"></i>' : (isActive ? '<span class="badge bg-white text-primary ms-1">Active</span>' : '')}
+                    </button>
+                `;
+            }
+
+            html += `
+                        </div>
+                        <span class="badge bg-light text-dark border p-2 small">
+                            <i class="fas fa-info-circle text-primary me-1"></i> 5 Tables &bull; Round ${rRomans[activeBridgeRound]}
+                        </span>
+                    </div>
+                </div>
+
+                <!-- 5 Tables Entry Sheet Form -->
+                <div class="card shadow-sm border-0 mb-4" style="border-radius: 12px; overflow: hidden;">
+                    <div class="card-header text-white d-flex justify-content-between align-items-center py-2" style="background-color: var(--hpcl-navy);">
+                        <div class="fw-bold">
+                            <i class="fas fa-edit me-1 text-warning"></i> Round ${rRomans[activeBridgeRound]} Scoresheet (Tables 1 to 5)
+                        </div>
+                        <span class="badge bg-white text-dark small fw-bold">Max 20.00 VPs per Match</span>
+                    </div>
+                    <div class="card-body p-3">
+                        <form id="bridgeRoundForm" onsubmit="event.preventDefault(); submitBridgeRound();">
+                            <div class="row g-3">
+            `;
+
+            // 5 Tables
+            for (let t = 1; t <= 5; t++) {
+                const fix = fixtures.find(f => f.table_no == t) || { table_no: t, team1_num: null, team2_num: null, team1_id: null, team2_id: null, vps_a: '', vps_b: '', imps_a: 0, imps_b: 0, status: 'scheduled', match_id: null };
+                const vpA = fix.vps_a !== null && fix.vps_a !== undefined ? fix.vps_a : '';
+                const vpB = fix.vps_b !== null && fix.vps_b !== undefined ? fix.vps_b : '';
+                const isCompleted = fix.status === 'completed';
+
+                html += `
+                    <div class="col-12">
+                        <div class="bridge-table-card p-3 ${isCompleted ? 'border-success border-opacity-50 bg-light' : ''}">
+                            <input type="hidden" name="tbl_match_id_${t}" id="br_match_id_${t}" value="${fix.match_id || ''}">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span class="badge bg-primary px-2 py-1 fw-bold">Table ${t}</span>
+                                <div class="d-flex align-items-center gap-2">
+                                    <label class="small text-muted fw-bold mb-0">Status:</label>
+                                    <select class="form-select form-select-sm" style="width: 130px;" id="br_status_${t}">
+                                        <option value="completed" ${fix.status === 'completed' ? 'selected' : ''}>Concluded</option>
+                                        <option value="in_progress" ${fix.status === 'in_progress' ? 'selected' : ''}>In Progress</option>
+                                        <option value="scheduled" ${fix.status === 'scheduled' ? 'selected' : ''}>Scheduled</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="row g-2 align-items-center">
+                                <!-- Team A Selection & VP -->
+                                <div class="col-md-5">
+                                    <label class="form-label small fw-bold mb-1 text-primary">Team A</label>
+                                    <select class="form-select form-select-sm fw-bold mb-2" id="br_t1_${t}">
+                                        <option value="">-- Select Team A --</option>
+                                        ${getCanonicalTeamOptions(fix.team1_id, fix.team1_num)}
+                                    </select>
+                                    <div class="d-flex align-items-center gap-2">
+                                        <label class="small text-muted mb-0 fw-bold" style="white-space:nowrap;">VPs:</label>
+                                        <input type="number" step="0.01" min="0" max="20" class="form-control form-control-sm fw-bold text-center fs-6" id="br_vp1_${t}" placeholder="0.00" value="${vpA}" oninput="autoBalanceBridgeVp(${t}, 1)">
+                                        <label class="small text-muted mb-0 fw-bold ms-1" style="white-space:nowrap;">IMPs:</label>
+                                        <input type="number" class="form-control form-control-sm text-center" style="max-width: 70px;" id="br_imp1_${t}" placeholder="0" value="${fix.imps_a || 0}">
+                                    </div>
+                                </div>
+
+                                <!-- VS Badge -->
+                                <div class="col-md-2 text-center my-2 my-md-0">
+                                    <span class="badge bg-secondary p-2 fw-bold font-monospace">VS</span>
+                                    <div class="small text-muted mt-1" id="br_sum_${t}" style="font-size: 0.72rem;">
+                                        ${vpA !== '' && vpB !== '' ? `Sum: ${(parseFloat(vpA) + parseFloat(vpB)).toFixed(2)}` : 'Sum: 20.00'}
+                                    </div>
+                                </div>
+
+                                <!-- Team B Selection & VP -->
+                                <div class="col-md-5">
+                                    <label class="form-label small fw-bold mb-1 text-danger">Team B</label>
+                                    <select class="form-select form-select-sm fw-bold mb-2" id="br_t2_${t}">
+                                        <option value="">-- Select Team B --</option>
+                                        ${getCanonicalTeamOptions(fix.team2_id, fix.team2_num)}
+                                    </select>
+                                    <div class="d-flex align-items-center gap-2">
+                                        <label class="small text-muted mb-0 fw-bold" style="white-space:nowrap;">VPs:</label>
+                                        <input type="number" step="0.01" min="0" max="20" class="form-control form-control-sm fw-bold text-center fs-6" id="br_vp2_${t}" placeholder="0.00" value="${vpB}" oninput="autoBalanceBridgeVp(${t}, 2)">
+                                        <label class="small text-muted mb-0 fw-bold ms-1" style="white-space:nowrap;">IMPs:</label>
+                                        <input type="number" class="form-control form-control-sm text-center" style="max-width: 70px;" id="br_imp2_${t}" placeholder="0" value="${fix.imps_b || 0}">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            html += `
+                            </div>
+
+                            <div class="d-flex justify-content-between align-items-center mt-3 pt-3 border-top">
+                                <span class="text-muted small">
+                                    <i class="fas fa-check-double text-success me-1"></i> Saves all 5 tables for Round ${rRomans[activeBridgeRound]}
+                                </span>
+                                <button type="submit" class="btn btn-success fw-bold px-4 py-2 shadow-sm" id="btnSaveBridgeRound">
+                                    <i class="fas fa-cloud-upload-alt me-1"></i> Save Round ${rRomans[activeBridgeRound]} Scores
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Live Consolidated Scoreboard Matrix -->
+                <div class="card shadow-sm border-0 mb-4" style="border-radius: 12px; overflow: hidden;">
+                    <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center py-2">
+                        <div class="fw-bold">
+                            <i class="fas fa-table text-warning me-1"></i> Live Consolidated Scoreboard (Whiteboard Matrix)
+                        </div>
+                        <span class="badge bg-primary text-uppercase">10 Teams &bull; Continuous 20-VP Scale</span>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="bridge-matrix-tbl">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 50px;">No.</th>
+                                        <th style="text-align: left; min-width: 130px;">Team Name</th>
+                                        <th style="width: 90px;">R-I</th>
+                                        <th style="width: 90px;">R-II</th>
+                                        <th style="width: 90px;">R-III</th>
+                                        <th style="width: 90px;">R-IV</th>
+                                        <th style="width: 90px;">R-V</th>
+                                        <th style="width: 80px;">TOTAL</th>
+                                        <th style="width: 60px;">RANK</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+            `;
+
+            // Sort matrix by team_no 1 to 10 for the official scoreboard view
+            const sortedMatrix = [...matrix].sort((a, b) => a.team_no - b.team_no);
+            sortedMatrix.forEach(row => {
+                html += `
+                    <tr>
+                        <td class="fw-bold text-primary font-monospace">${row.team_no}</td>
+                        <td style="text-align: left;">
+                            <span class="badge me-1" style="background-color: ${row.color_code || '#0284c7'}; font-size: 0.72rem;">${row.short_code}</span>
+                            <strong class="text-dark">${row.name}</strong>
+                        </td>
+                `;
+
+                for (let r = 1; r <= 5; r++) {
+                    const rnd = row.rounds[r];
+                    if (rnd && rnd.cum_vp !== null) {
+                        html += `
+                            <td>
+                                <div class="bridge-cell-split" title="Round ${r}: ${rnd.round_vp !== null ? '+' + parseFloat(rnd.round_vp).toFixed(2) + ' VP' : ''} vs Team #${rnd.opp_no}">
+                                    <div class="bridge-cell-cum-vp">${parseFloat(rnd.cum_vp).toFixed(2)}</div>
+                                    <div class="bridge-cell-opp-no">${rnd.opp_no}</div>
+                                </div>
+                            </td>
+                        `;
+                    } else if (rnd && rnd.opp_no) {
+                        html += `
+                            <td>
+                                <div class="bridge-cell-split" title="Scheduled vs Team #${rnd.opp_no}">
+                                    <div class="bridge-cell-cum-vp" style="color: #94a3b8;">-</div>
+                                    <div class="bridge-cell-opp-no">${rnd.opp_no}</div>
+                                </div>
+                            </td>
+                        `;
+                    } else {
+                        html += `<td><div class="bridge-cell-empty"></div></td>`;
+                    }
+                }
+
+                html += `
+                        <td class="fw-bold font-monospace text-primary fs-6">${parseFloat(row.total_vp || 0).toFixed(2)}</td>
+                        <td>
+                            ${row.rank === 1 ? '<span class="badge bg-warning text-dark"><i class="fas fa-crown"></i> 1</span>' :
+                              row.rank === 2 ? '<span class="badge bg-secondary">2</span>' :
+                              row.rank === 3 ? '<span class="badge bg-danger">3</span>' :
+                              `<span class="text-muted fw-bold">${row.rank}</span>`}
+                        </td>
+                    </tr>
+                `;
+            });
+
+            html += `
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="card-footer bg-light p-2 text-muted small d-flex justify-content-between align-items-center">
+                        <span><i class="fas fa-info-circle me-1 text-info"></i> Diagonal split: Top-Left = Cumulative VPs, Bottom-Right = Opponent Team #</span>
+                        <span>Sum of both teams per round = 20.00 VPs</span>
+                    </div>
+                </div>
+            </div>
+            `;
+
+            container.innerHTML = html;
+        }
+
         // Initialize
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('sport') === 'bridge' || urlParams.get('discipline') === 'bridge') {
+            const filterEl = document.getElementById('sportFilter');
+            if (filterEl) filterEl.value = 'bridge';
+        }
+
         updateNetworkStatus();
         fetchMatches();
         checkPendingSync();

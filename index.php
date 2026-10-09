@@ -29,6 +29,13 @@ if (strpos($path, 'admin') === 0 && $path !== 'admin/login' && $path !== 'admin/
         exit;
     }
 
+    // Role-based route restriction for Volunteers: Strictly block from all admin dashboard routes
+    if (isset($_SESSION['role']) && $_SESSION['role'] === 'volunteer') {
+        $_SESSION['flash_err'] = "Access Restricted: Volunteers are only authorized to use the Court-Side Scoring Terminal.";
+        header("Location: " . BASE_URL . "/volunteer");
+        exit;
+    }
+
     // Role-based route restriction for Team Managers
     if (isset($_SESSION['role']) && $_SESSION['role'] === 'nodal') {
         $allowedManagerRoutes = [
@@ -70,6 +77,7 @@ switch ($path) {
         require 'views/admin/login.php';
         break;
         
+    case 'volunteer/logout':
     case 'admin/logout':
         session_destroy();
         header("Location: " . BASE_URL . "/admin/login");
@@ -199,6 +207,12 @@ switch ($path) {
     // API Routes for PWA / Frontend Ajax
     case 'api/matches':
         require 'api/matches.php';
+        break;
+
+    case 'api/bridge_scores':
+    case 'api/bridge-scores':
+    case 'api/bridge_scores.php':
+        require 'api/bridge_scores.php';
         break;
 
     case 'api/albums':

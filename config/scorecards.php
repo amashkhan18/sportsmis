@@ -822,3 +822,178 @@ function get_bridge_discipline_standings($pdo, $gameId) {
 
     return $standings;
 }
+
+/**
+ * Compute Bridge Swiss Matrix (R-I to R-V, Cumulative VPs, Opponent Team No., Total, Rank)
+ */
+function get_bridge_swiss_matrix($pdo, $gameId) {
+    // Official tournament numbering from Bridge whiteboard:
+    $canonical = [
+        1 => ['code' => 'MF', 'name' => 'MARATHON', 'full' => 'Marathon'],
+        2 => ['code' => 'MR', 'name' => 'MR', 'full' => 'Mumbai Refinery'],
+        3 => ['code' => 'NCZ', 'name' => 'NCZ', 'full' => 'North Central Zone'],
+        4 => ['code' => 'HB', 'name' => 'HB', 'full' => 'Hindustan Bhawan'],
+        5 => ['code' => 'VR', 'name' => 'VR', 'full' => 'Vizag refinery'],
+        6 => ['code' => 'WZ', 'name' => 'WZ', 'full' => 'West Zone'],
+        7 => ['code' => 'NZ', 'name' => 'NZ', 'full' => 'North Zone'],
+        8 => ['code' => 'SCZ', 'name' => 'SCZ', 'full' => 'South Central Zone'],
+        9 => ['code' => 'PH', 'name' => 'PH', 'full' => 'Petroleum House'],
+        10 => ['code' => 'NWZ', 'name' => 'NWZ', 'full' => 'North West Zone']
+    ];
+
+    $dbTeams = $pdo->query("
+        SELECT t.id, t.name, u.short_code, u.color_code, u.name as unit_name
+        FROM teams t
+        JOIN units u ON t.unit_id = u.id
+        WHERE t.game_id = $gameId
+    ")->fetchAll(PDO::FETCH_ASSOC);
+
+    $teamNumById = [];
+    $matrix = [];
+
+    foreach ($canonical as $num => $info) {
+        $found = null;
+        foreach ($dbTeams as $t) {
+            if (strcasecmp($t['short_code'], $info['code']) === 0) {
+                $found = $t;
+                break;
+            }
+        }
+        $tId = $found ? (int)$found['id'] : null;
+        if ($tId) {
+            $teamNumById[$tId] = $num;
+        }
+
+        $matrix[$num] = [
+            'team_no' => $num,
+            'name' => $info['name'],
+            'full_name' => $found['unit_name'] ?? $info['full'],
+            'short_code' => $info['code'],
+            'team_id' => $tId,
+            'color_code' => $found['color_code'] ?? '#003366',
+            'rounds' => [
+                1 => ['opp_no' => null, 'round_vp' => null, 'cum_vp' => null, 'status' => 'scheduled', 'match_id' => null, 'table_no' => null],
+                2 => ['opp_no' => null, 'round_vp' => null, 'cum_vp' => null, 'status' => 'scheduled', 'match_id' => null, 'table_no' => null],
+                3 => ['opp_no' => null, 'round_vp' => null, 'cum_vp' => null, 'status' => 'scheduled', 'match_id' => null, 'table_no' => null],
+                4 => ['opp_no' => null, 'round_vp' => null, 'cum_vp' => null, 'status' => 'scheduled', 'match_id' => null, 'table_no' => null],
+                5 => ['opp_no' => null, 'round_vp' => null, 'cum_vp' => null, 'status' => 'scheduled', 'match_id' => null, 'table_no' => null],
+            ],
+            'total_vp' => 0.0,
+            'rank' => 10
+        ];
+    }
+
+    // Fetch matches for game
+    $stmt = $pdo->prepare("SELECT * FROM matches WHERE game_id = ? ORDER BY id ASC");
+    $stmt->execute([$gameId]);
+    $matches = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $roundFixtures = [1 => [], 2 => [], 3 => [], 4 => [], 5 => []];
+
+    foreach ($matches as $m) {
+        $scores = json_decode($m['scores_json'] ?? '{}', true) ?: [];
+        $rNo = (int)($scores['round_no'] ?? 0);
+        if ($rNo < 1 || $rNo > 5) {
+            if (preg_match('/(?:Round|R)[ -]*([1-5]|I{1,3}|IV|V)/i', $m['round'], $matchesRound)) {
+                $rStr = strtoupper($matchesRound[1]);
+                $mapRoman = ['1' => 1, '2' => 2, '3' => 3, '4' => 4, '5' => 5, 'I' => 1, 'II' => 2, 'III' => 3, 'IV' => 4, 'V' => 5];
+                $rNo = $mapRoman[$rStr] ?? 0;
+            }
+        }
+        if ($rNo < 1 || $rNo > 5) continue;
+
+        $t1Id = $m['team1_id'];
+        $t2Id = $m['team2_id'];
+        $t1Num = $teamNumById[$t1Id] ?? null;
+        $t2Num = $teamNumById[$t2Id] ?? null;
+
+        $tableNo = (int)($scores['table_no'] ?? 0);
+        if (!$tableNo && preg_match('/Table\s*([1-5])/i', $m['pool_name'] ?? '', $tblMatch)) {
+            $tableNo = (int)$tblMatch[1];
+        }
+
+        $vpA = isset($scores['vps_a']) ? (float)$scores['vps_a'] : null;
+        $vpB = isset($scores['vps_b']) ? (float)$scores['vps_b'] : null;
+        $status = $m['status'];
+
+        if ($t1Num && $t2Num) {
+            $matrix[$t1Num]['rounds'][$rNo]['opp_no'] = $t2Num;
+            $matrix[$t2Num]['rounds'][$rNo]['opp_no'] = $t1Num;
+            $matrix[$t1Num]['rounds'][$rNo]['status'] = $status;
+            $matrix[$t2Num]['rounds'][$rNo]['status'] = $status;
+            $matrix[$t1Num]['rounds'][$rNo]['match_id'] = $m['id'];
+            $matrix[$t2Num]['rounds'][$rNo]['match_id'] = $m['id'];
+            $matrix[$t1Num]['rounds'][$rNo]['table_no'] = $tableNo;
+            $matrix[$t2Num]['rounds'][$rNo]['table_no'] = $tableNo;
+
+            if ($status === 'completed' && $vpA !== null && $vpB !== null) {
+                $matrix[$t1Num]['rounds'][$rNo]['round_vp'] = $vpA;
+                $matrix[$t2Num]['rounds'][$rNo]['round_vp'] = $vpB;
+            } elseif ($status === 'in_progress' && ($vpA !== null || $vpB !== null)) {
+                $matrix[$t1Num]['rounds'][$rNo]['round_vp'] = $vpA;
+                $matrix[$t2Num]['rounds'][$rNo]['round_vp'] = $vpB;
+            }
+        }
+
+        $roundFixtures[$rNo][] = [
+            'match_id' => $m['id'],
+            'table_no' => $tableNo ?: (count($roundFixtures[$rNo]) + 1),
+            'team1_id' => $t1Id,
+            'team2_id' => $t2Id,
+            'team1_num' => $t1Num,
+            'team2_num' => $t2Num,
+            'team1_name' => $t1Num ? $matrix[$t1Num]['name'] : 'TBD',
+            'team2_name' => $t2Num ? $matrix[$t2Num]['name'] : 'TBD',
+            'team1_code' => $t1Num ? $matrix[$t1Num]['short_code'] : '',
+            'team2_code' => $t2Num ? $matrix[$t2Num]['short_code'] : '',
+            'team1_color' => $t1Num ? $matrix[$t1Num]['color_code'] : '#94a3b8',
+            'team2_color' => $t2Num ? $matrix[$t2Num]['color_code'] : '#94a3b8',
+            'vps_a' => $vpA,
+            'vps_b' => $vpB,
+            'imps_a' => $scores['imps_a'] ?? 0,
+            'imps_b' => $scores['imps_b'] ?? 0,
+            'status' => $status,
+            'winner_id' => $m['winner_id']
+        ];
+    }
+
+    // Sort round fixtures by table_no
+    for ($r = 1; $r <= 5; $r++) {
+        usort($roundFixtures[$r], function($a, $b) {
+            return ($a['table_no'] ?? 0) <=> ($b['table_no'] ?? 0);
+        });
+    }
+
+    // Compute cumulative VPs across rounds
+    foreach ($matrix as $num => &$row) {
+        $cum = 0.0;
+        for ($r = 1; $r <= 5; $r++) {
+            if ($row['rounds'][$r]['round_vp'] !== null) {
+                $cum += $row['rounds'][$r]['round_vp'];
+                $row['rounds'][$r]['cum_vp'] = round($cum, 2);
+            }
+        }
+        $row['total_vp'] = round($cum, 2);
+    }
+    unset($row);
+
+    // Calculate Ranks (highest Total VP gets Rank 1)
+    $sorted = $matrix;
+    uasort($sorted, function($a, $b) {
+        if ($b['total_vp'] != $a['total_vp']) {
+            return ($b['total_vp'] > $a['total_vp']) ? 1 : -1;
+        }
+        return $a['team_no'] <=> $b['team_no'];
+    });
+
+    $rank = 1;
+    foreach ($sorted as $num => $data) {
+        $matrix[$num]['rank'] = $rank++;
+    }
+
+    return [
+        'matrix' => $matrix,
+        'fixtures' => $roundFixtures,
+        'canonical_teams' => $canonical
+    ];
+}
