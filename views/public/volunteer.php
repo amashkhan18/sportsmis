@@ -283,7 +283,7 @@ if (session_status() === PHP_SESSION_NONE) {
                 </div>
 
                 <div class="d-flex align-items-center gap-2">
-                    <select id="sportFilter" class="form-select form-select-sm" style="width: auto; min-width: 140px;" onchange="renderMatches()">
+                    <select id="sportFilter" class="form-select form-select-sm" style="width: auto; min-width: 140px;" onchange="onSportFilterChange()">
                         <option value="all">All Sports</option>
                         <option value="badminton_table_tennis">Badminton & TT</option>
                         <option value="tennis">Lawn Tennis</option>
@@ -293,7 +293,7 @@ if (session_status() === PHP_SESSION_NONE) {
                         <option value="swimming">Swimming</option>
                     </select>
 
-                    <button class="btn btn-light btn-sm border" onclick="fetchMatches()" title="Refresh Matches">
+                    <button class="btn btn-light btn-sm border" onclick="handleManualRefresh()" title="Refresh Matches">
                         <i class="fas fa-redo"></i>
                     </button>
                 </div>
@@ -782,7 +782,9 @@ if (session_status() === PHP_SESSION_NONE) {
         const API_URL = '<?= BASE_URL ?>/api/matches';
         const BRIDGE_API_URL = '<?= BASE_URL ?>/api/bridge_scores.php';
         let bridgeData = null;
+        let activeBridgeStage = 'super_league'; // 'super_league' (10th Oct Finals) or 'swiss' (Prelims)
         let activeBridgeRound = 1;
+        let activeSuperLeagueRound = 1;
         const ZONES = ['VR', 'NC', 'MP', 'PH', 'SZ', 'WZ', 'NZ', 'MR', 'NW', 'SC', 'EZ', 'HB'];
         let localMatches = JSON.parse(localStorage.getItem('pwa_matches')) || [];
         let pendingSync = JSON.parse(localStorage.getItem('pwa_pending_sync')) || [];
@@ -813,15 +815,75 @@ if (session_status() === PHP_SESSION_NONE) {
         window.addEventListener('online', updateNetworkStatus);
         window.addEventListener('offline', updateNetworkStatus);
 
+        let previousSportFilter = 'all';
+
+        function onSportFilterChange() {
+            const filterEl = document.getElementById('sportFilter');
+            const newFilter = filterEl ? filterEl.value : 'all';
+
+            if (previousSportFilter === 'bridge' && newFilter !== 'bridge' && isBridgeFormDirty()) {
+                if (!confirm('You have unsaved scores entered in the Bridge form. Discard and switch sports?')) {
+                    filterEl.value = 'bridge';
+                    return;
+                }
+            }
+
+            previousSportFilter = newFilter;
+            if (newFilter === 'bridge') {
+                renderMatches();
+            } else {
+                if (localMatches.length === 0) {
+                    fetchMatches();
+                } else {
+                    renderMatches();
+                }
+            }
+        }
+
+        function handleManualRefresh() {
+            const sportFilter = document.getElementById('sportFilter')?.value;
+            if (sportFilter === 'bridge') {
+                refreshBridgeScores();
+            } else {
+                fetchMatches();
+            }
+        }
+
+        function handleAutoPoll() {
+            const sportFilter = document.getElementById('sportFilter')?.value;
+            // CRITICAL: When viewing Bridge, NEVER poll ./api/matches or reload matchesContainer
+            if (sportFilter === 'bridge') {
+                return;
+            }
+            fetchMatches(true);
+        }
+
         function setTab(tab) {
             activeTab = tab;
             document.getElementById('tabActive').classList.toggle('active', tab === 'active');
             document.getElementById('tabCompleted').classList.toggle('active', tab === 'completed');
-            renderMatches();
+            if (document.getElementById('sportFilter')?.value !== 'bridge') {
+                renderMatches();
+            }
         }
 
         // Fetch matches from server
-        async function fetchMatches() {
+        async function fetchMatches(isAutoPoll = false) {
+            const currentSport = document.getElementById('sportFilter')?.value;
+            // CRITICAL: When viewing Bridge, do NOT call ./api/matches or re-render matchesContainer
+            if (currentSport === 'bridge') {
+                return;
+            }
+
+            if (isAutoPoll) {
+                const modalEl = document.getElementById('scoreModal');
+                if (modalEl && modalEl.classList.contains('show')) return;
+                const container = document.getElementById('matchesContainer');
+                if (container && document.activeElement && container.contains(document.activeElement) && ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName)) {
+                    return;
+                }
+            }
+
             if (navigator.onLine) {
                 try {
                     const res = await fetch(API_URL);
@@ -844,14 +906,14 @@ if (session_status() === PHP_SESSION_NONE) {
 
         function renderMatches() {
             const container = document.getElementById('matchesContainer');
-            container.innerHTML = '';
-            
             const sportFilter = document.getElementById('sportFilter').value;
 
             if (sportFilter === 'bridge') {
                 renderBridgeRoundScoring(container);
                 return;
             }
+
+            container.innerHTML = '';
 
             // Count for tabs
             const activeMatches = localMatches.filter(m => m.status === 'in_progress' || m.status === 'scheduled');
@@ -1579,21 +1641,82 @@ if (session_status() === PHP_SESSION_NONE) {
             return bridgeData;
         }
 
+        function isBridgeFormDirty() {
+            const form = document.getElementById('bridgeRoundForm');
+            if (!form) return false;
+            const maxTables = (activeBridgeStage === 'super_league') ? 2 : 5;
+            for (let t = 1; t <= maxTables; t++) {
+                const fields = [`br_vp1_${t}`, `br_vp2_${t}`, `br_imp1_${t}`, `br_imp2_${t}`, `br_status_${t}`, `br_t1_${t}`, `br_t2_${t}`];
+                for (const fId of fields) {
+                    const el = document.getElementById(fId);
+                    if (el && el.dataset.initialVal !== undefined) {
+                        const cur = String(el.value ?? '').trim();
+                        const init = String(el.dataset.initialVal ?? '').trim();
+                        if (cur !== init) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+
         async function refreshBridgeScores() {
+            if (isBridgeFormDirty()) {
+                if (!confirm('You have unsaved changes in the Bridge score form. Discard changes and refresh?')) {
+                    return;
+                }
+            }
             const statusMsg = document.getElementById('syncStatusMsg');
-            statusMsg.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Refreshing Bridge tournament data...';
+            if (statusMsg) statusMsg.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Refreshing Bridge tournament data...';
             await fetchBridgeData(true);
-            statusMsg.innerHTML = '<i class="fas fa-check-circle text-success me-1"></i> Bridge data up to date.';
+            if (statusMsg) statusMsg.innerHTML = '<i class="fas fa-check-circle text-success me-1"></i> Bridge data up to date.';
             const container = document.getElementById('matchesContainer');
-            if (document.getElementById('sportFilter').value === 'bridge') {
-                renderBridgeRoundScoring(container);
+            if (document.getElementById('sportFilter')?.value === 'bridge') {
+                renderBridgeRoundScoring(container, true);
             }
         }
 
-        function setBridgeRound(roundNo) {
-            activeBridgeRound = roundNo;
+        function setBridgeStage(stage) {
+            if (stage === activeBridgeStage) return;
+            if (isBridgeFormDirty()) {
+                if (!confirm('You have unsaved changes in the Bridge score form. Discard changes and switch stages?')) {
+                    return;
+                }
+            }
+            activeBridgeStage = stage;
             const container = document.getElementById('matchesContainer');
-            renderBridgeRoundScoring(container);
+            renderBridgeRoundScoring(container, false);
+        }
+
+        function setBridgeRound(roundNo) {
+            if (activeBridgeStage === 'super_league') {
+                if (roundNo === activeSuperLeagueRound) return;
+                if (isBridgeFormDirty()) {
+                    if (!confirm(`You have unsaved changes in Super League Round ${activeSuperLeagueRound}. Switch to Round ${roundNo} without saving?`)) {
+                        return;
+                    }
+                }
+                activeSuperLeagueRound = roundNo;
+            } else {
+                if (roundNo === activeBridgeRound) return;
+                if (isBridgeFormDirty()) {
+                    if (!confirm(`You have unsaved changes in Swiss Round ${activeBridgeRound}. Switch to Round ${roundNo} without saving?`)) {
+                        return;
+                    }
+                }
+                activeBridgeRound = roundNo;
+            }
+            const container = document.getElementById('matchesContainer');
+            renderBridgeRoundScoring(container, false);
+        }
+
+        function getSuperLeagueTeamOptions(selectedId, selectedSeed) {
+            if (!bridgeData || !bridgeData.super_league || !bridgeData.super_league.qualified_teams) return '';
+            return bridgeData.super_league.qualified_teams.map(t => {
+                const isSel = (selectedId && t.team_id == selectedId) || (selectedSeed && t.seed == selectedSeed);
+                return `<option value="${t.team_id || ''}" data-seed="${t.seed}" ${isSel ? 'selected' : ''}>Seed #${t.seed} - ${t.short_code} (${t.name})</option>`;
+            }).join('');
         }
 
         function getCanonicalTeamOptions(selectedId, selectedNum) {
@@ -1636,12 +1759,19 @@ if (session_status() === PHP_SESSION_NONE) {
 
         async function submitBridgeRound() {
             const btn = document.getElementById('btnSaveBridgeRound');
-            const originalText = btn.innerHTML;
-            btn.disabled = true;
-            btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Saving Round Scores...';
+            const originalText = btn ? btn.innerHTML : '';
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Saving Round Scores...';
+            }
+
+            const isSuperLeague = (activeBridgeStage === 'super_league');
+            const maxTables = isSuperLeague ? 2 : 5;
+            const currentRound = isSuperLeague ? activeSuperLeagueRound : activeBridgeRound;
+            const roundLabel = isSuperLeague ? `SL-${['I','II','III'][currentRound - 1]}` : `R-${['I','II','III','IV','V'][currentRound - 1]}`;
 
             const tablesData = [];
-            for (let t = 1; t <= 5; t++) {
+            for (let t = 1; t <= maxTables; t++) {
                 const t1Select = document.getElementById(`br_t1_${t}`);
                 const t2Select = document.getElementById(`br_t2_${t}`);
                 const vp1Input = document.getElementById(`br_vp1_${t}`);
@@ -1675,7 +1805,8 @@ if (session_status() === PHP_SESSION_NONE) {
 
             try {
                 const payload = {
-                    round_no: activeBridgeRound,
+                    stage: isSuperLeague ? 'super_league' : 'swiss',
+                    round_no: currentRound,
                     tables: tablesData
                 };
 
@@ -1689,9 +1820,9 @@ if (session_status() === PHP_SESSION_NONE) {
                 if (result.status === 'success') {
                     bridgeData = result; // update cached data
                     const statusMsg = document.getElementById('syncStatusMsg');
-                    statusMsg.innerHTML = `<i class="fas fa-check-circle text-success me-1"></i> ${result.message}`;
-                    alert(`✅ Round ${activeBridgeRound} scores saved successfully! Standings and broadcast updated.`);
-                    renderBridgeRoundScoring(document.getElementById('matchesContainer'));
+                    if (statusMsg) statusMsg.innerHTML = `<i class="fas fa-check-circle text-success me-1"></i> ${result.message}`;
+                    alert(`✅ ${isSuperLeague ? 'Super League' : 'Swiss'} ${roundLabel} scores saved successfully! Live Scoreboard updated.`);
+                    renderBridgeRoundScoring(document.getElementById('matchesContainer'), true);
                 } else {
                     alert('⚠️ Error saving round: ' + (result.message || 'Check inputs'));
                 }
@@ -1706,75 +1837,318 @@ if (session_status() === PHP_SESSION_NONE) {
             }
         }
 
-        async function renderBridgeRoundScoring(container) {
-            container.innerHTML = `
-                <div class="col-12 text-center py-5">
-                    <div class="spinner-border text-primary" role="status"></div>
-                    <p class="text-muted mt-2">Loading Bridge Tournament Console & Matrix...</p>
-                </div>
-            `;
-
-            try {
-                await fetchBridgeData();
-            } catch (e) {
-                console.error(e);
+        async function renderBridgeRoundScoring(container, forceRefresh = false) {
+            if (!bridgeData || forceRefresh) {
                 container.innerHTML = `
-                    <div class="col-12">
-                        <div class="alert alert-danger text-center">
-                            <i class="fas fa-exclamation-circle fa-2x mb-2 d-block"></i>
-                            Failed to connect to Bridge scoring service.
-                        </div>
-                    </div>`;
-                return;
+                    <div class="col-12 text-center py-5">
+                        <div class="spinner-border text-primary" role="status"></div>
+                        <p class="text-muted mt-2">Loading Bridge Tournament Console & Matrix...</p>
+                    </div>
+                `;
+
+                try {
+                    await fetchBridgeData(forceRefresh);
+                } catch (e) {
+                    console.error(e);
+                    container.innerHTML = `
+                        <div class="col-12">
+                            <div class="alert alert-danger text-center">
+                                <i class="fas fa-exclamation-circle fa-2x mb-2 d-block"></i>
+                                Failed to connect to Bridge scoring service.
+                            </div>
+                        </div>`;
+                    return;
+                }
             }
 
-            const rRomans = { 1: 'R-I', 2: 'R-II', 3: 'R-III', 4: 'R-IV', 5: 'R-V' };
-            const fixtures = (bridgeData.fixtures && bridgeData.fixtures[activeBridgeRound]) ? bridgeData.fixtures[activeBridgeRound] : [];
-            const matrix = bridgeData.matrix || [];
+            const isSuperLeague = (activeBridgeStage === 'super_league');
 
             let html = `
             <div class="col-12">
-                <!-- Header Banner -->
-                <div class="card shadow-sm border-0 mb-3" style="border-radius: 12px; background: linear-gradient(135deg, #1e293b, #0f172a); color: #fff;">
-                    <div class="card-body p-3 d-flex flex-wrap justify-content-between align-items-center gap-2">
-                        <div>
-                            <span class="badge bg-warning text-dark px-2 py-1 mb-1 fw-bold">Bridge Scoring Console</span>
-                            <h5 class="fw-bold mb-0 text-white"><i class="fas fa-clone text-info me-2"></i> HPCL Inter Unit Tournament 2026 - Round-Wise Sheet</h5>
-                            <small class="text-white-50">Continuous 20-VP Scale &bull; Auto-computes match VP balance (VP A + VP B = 20.00)</small>
+                <!-- Master Stage Header Banner -->
+                <div class="card shadow-sm border-0 mb-3" style="border-radius: 12px; background: linear-gradient(135deg, #0f172a, #1e293b); color: #fff;">
+                    <div class="card-body p-3">
+                        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                            <div>
+                                <span class="badge bg-warning text-dark px-2 py-1 mb-1 fw-bold">Bridge Scoring Console</span>
+                                <h5 class="fw-bold mb-0 text-white"><i class="fas fa-clone text-info me-2"></i> HPCL Inter Unit Tournament 2026</h5>
+                                <small class="text-white-50">Continuous 20-VP Scale &bull; Auto-computes match VP balance (VP A + VP B = 20.00)</small>
+                            </div>
+                            <div class="d-flex gap-2">
+                                <a href="<?= BASE_URL ?>/bridge" target="_blank" class="btn btn-sm btn-outline-info fw-bold">
+                                    <i class="fas fa-external-link-alt me-1"></i> Public Scoreboard
+                                </a>
+                                <button class="btn btn-sm btn-light fw-bold" onclick="refreshBridgeScores()">
+                                    <i class="fas fa-sync-alt me-1"></i> Refresh
+                                </button>
+                            </div>
                         </div>
-                        <div class="d-flex gap-2">
-                            <a href="<?= BASE_URL ?>/bridge" target="_blank" class="btn btn-sm btn-outline-info fw-bold">
-                                <i class="fas fa-external-link-alt me-1"></i> Public Scoreboard
-                            </a>
-                            <button class="btn btn-sm btn-light fw-bold" onclick="refreshBridgeScores()">
-                                <i class="fas fa-sync-alt me-1"></i> Refresh
+
+                        <!-- Stage Switcher Tabs -->
+                        <div class="d-flex gap-2 bg-black bg-opacity-25 p-1 rounded-3">
+                            <button type="button" class="btn btn-sm flex-fill fw-bold ${isSuperLeague ? 'btn-warning text-dark shadow-sm' : 'btn-outline-light border-0 text-white-50'}" onclick="setBridgeStage('super_league')">
+                                <i class="fas fa-trophy me-1"></i> 🏆 Super League Finals (10th Oct)
+                            </button>
+                            <button type="button" class="btn btn-sm flex-fill fw-bold ${!isSuperLeague ? 'btn-info text-dark shadow-sm' : 'btn-outline-light border-0 text-white-50'}" onclick="setBridgeStage('swiss')">
+                                <i class="fas fa-th-list me-1"></i> 📊 Swiss Prelims (Concluded)
                             </button>
                         </div>
                     </div>
                 </div>
+            `;
 
-                <!-- Round Tabs -->
+            if (isSuperLeague) {
+                // ==========================================
+                // SUPER LEAGUE FINALS (10th October 2026)
+                // ==========================================
+                const slRomans = { 1: 'SL-I', 2: 'SL-II', 3: 'SL-III' };
+                const slTimes = { 1: '10:00 - 12:00', 2: '12:30 - 14:30', 3: '15:30 - 17:30' };
+                const slFixtures = (bridgeData.super_league && bridgeData.super_league.fixtures && bridgeData.super_league.fixtures[activeSuperLeagueRound]) ? bridgeData.super_league.fixtures[activeSuperLeagueRound] : [];
+                const slMatrix = (bridgeData.super_league && bridgeData.super_league.matrix) ? bridgeData.super_league.matrix : [];
+                const qualified = (bridgeData.super_league && bridgeData.super_league.qualified_teams) ? bridgeData.super_league.qualified_teams : [];
+
+                html += `
+                <!-- Super League Round Tabs -->
                 <div class="card shadow-sm border-0 mb-3" style="border-radius: 10px;">
                     <div class="card-body p-2 d-flex flex-wrap justify-content-between align-items-center gap-2">
                         <div class="btn-group btn-group-sm flex-wrap" role="group">
-            `;
+                `;
 
-            for (let r = 1; r <= 5; r++) {
-                const fixes = (bridgeData.fixtures && bridgeData.fixtures[r]) ? bridgeData.fixtures[r] : [];
-                const isDone = fixes.length > 0 && fixes.every(f => f.status === 'completed');
-                const isActive = (r === activeBridgeRound);
+                for (let r = 1; r <= 3; r++) {
+                    const fixes = (bridgeData.super_league && bridgeData.super_league.fixtures && bridgeData.super_league.fixtures[r]) ? bridgeData.super_league.fixtures[r] : [];
+                    const isDone = fixes.length > 0 && fixes.every(f => f.status === 'completed');
+                    const isActive = (r === activeSuperLeagueRound);
+
+                    html += `
+                        <button type="button" class="btn ${isActive ? 'btn-warning text-dark active fw-bold' : (isDone ? 'btn-outline-success' : 'btn-outline-secondary')} px-3 py-2" onclick="setBridgeRound(${r})">
+                            ${slRomans[r]} <span class="d-none d-md-inline small">(${slTimes[r]})</span> ${isDone ? '<i class="fas fa-check-circle ms-1 text-success"></i>' : (isActive ? '<span class="badge bg-dark text-white ms-1">Active</span>' : '')}
+                        </button>
+                    `;
+                }
 
                 html += `
-                    <button type="button" class="btn ${isActive ? 'btn-primary active fw-bold' : (isDone ? 'btn-outline-success' : 'btn-outline-secondary')} px-3 py-2" onclick="setBridgeRound(${r})">
-                        ${rRomans[r]} ${isDone ? '<i class="fas fa-check ms-1"></i>' : (isActive ? '<span class="badge bg-white text-primary ms-1">Active</span>' : '')}
-                    </button>
-                `;
-            }
+                        </div>
+                        <span class="badge bg-primary text-white p-2 small">
+                            <i class="fas fa-calendar-day me-1"></i> 10th October 2026 &bull; 2 Tables &bull; Round ${slRomans[activeSuperLeagueRound]}
+                        </span>
+                    </div>
+                </div>
 
-            html += `
+                <!-- 2 Tables Entry Sheet for Super League -->
+                <div class="card shadow-sm border-0 mb-4" style="border-radius: 12px; overflow: hidden;">
+                    <div class="card-header text-white d-flex justify-content-between align-items-center py-2" style="background-color: #0f172a;">
+                        <div class="fw-bold">
+                            <i class="fas fa-edit me-1 text-warning"></i> Super League Round ${slRomans[activeSuperLeagueRound]} Scoresheet (Tables 1 & 2)
+                        </div>
+                        <span class="badge bg-warning text-dark small fw-bold">Max 20.00 VPs per Table</span>
+                    </div>
+                    <div class="card-body p-3">
+                        <form id="bridgeRoundForm" onsubmit="event.preventDefault(); submitBridgeRound();">
+                            <div class="row g-3">
+                `;
+
+                // 2 Tables for Super League
+                for (let t = 1; t <= 2; t++) {
+                    const fix = slFixtures.find(f => f.table_no == t) || { table_no: t, team1_id: null, team2_id: null, team1_seed: null, team2_seed: null, vps_a: '', vps_b: '', imps_a: 0, imps_b: 0, status: 'scheduled', match_id: null };
+                    const vpA = fix.vps_a !== null && fix.vps_a !== undefined ? fix.vps_a : '';
+                    const vpB = fix.vps_b !== null && fix.vps_b !== undefined ? fix.vps_b : '';
+                    const isCompleted = fix.status === 'completed';
+
+                    html += `
+                        <div class="col-12">
+                            <div class="bridge-table-card p-3 ${isCompleted ? 'border-success border-opacity-50 bg-light' : ''}">
+                                <input type="hidden" name="tbl_match_id_${t}" id="br_match_id_${t}" value="${fix.match_id || ''}">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <div class="d-flex align-items-center gap-2">
+                                        <span class="badge bg-warning text-dark px-2 py-1 fw-bold fs-6">Table ${t}</span>
+                                        <span class="badge bg-light text-muted border small"><i class="far fa-clock me-1"></i>${slTimes[activeSuperLeagueRound]}</span>
+                                    </div>
+                                    <div class="d-flex align-items-center gap-2">
+                                        <label class="small text-muted fw-bold mb-0">Status:</label>
+                                        <select class="form-select form-select-sm" style="width: 130px;" id="br_status_${t}" data-initial-val="${fix.status || 'scheduled'}">
+                                            <option value="completed" ${fix.status === 'completed' ? 'selected' : ''}>Concluded</option>
+                                            <option value="in_progress" ${fix.status === 'in_progress' ? 'selected' : ''}>In Progress</option>
+                                            <option value="scheduled" ${fix.status === 'scheduled' ? 'selected' : ''}>Scheduled</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div class="row g-2 align-items-center">
+                                    <!-- Team A Selection & VP -->
+                                    <div class="col-md-5">
+                                        <label class="form-label small fw-bold mb-1 text-primary">Team A (Finalist)</label>
+                                        <select class="form-select form-select-sm fw-bold mb-2" id="br_t1_${t}" data-initial-val="${fix.team1_id || ''}">
+                                            <option value="">-- Select Finalist A --</option>
+                                            ${getSuperLeagueTeamOptions(fix.team1_id, fix.team1_seed)}
+                                        </select>
+                                        <div class="d-flex align-items-center gap-2">
+                                            <label class="small text-muted mb-0 fw-bold" style="white-space:nowrap;">VPs:</label>
+                                            <input type="number" step="0.01" min="0" max="20" class="form-control form-control-sm fw-bold text-center fs-6" id="br_vp1_${t}" placeholder="0.00" value="${vpA}" data-initial-val="${vpA}" oninput="autoBalanceBridgeVp(${t}, 1)">
+                                            <label class="small text-muted mb-0 fw-bold ms-1" style="white-space:nowrap;">IMPs:</label>
+                                            <input type="number" class="form-control form-control-sm text-center" style="max-width: 70px;" id="br_imp1_${t}" placeholder="0" value="${fix.imps_a || 0}" data-initial-val="${fix.imps_a || 0}">
+                                        </div>
+                                    </div>
+
+                                    <!-- VS Badge -->
+                                    <div class="col-md-2 text-center my-2 my-md-0">
+                                        <span class="badge bg-secondary p-2 fw-bold font-monospace">VS</span>
+                                        <div class="small text-muted mt-1" id="br_sum_${t}" style="font-size: 0.72rem;">
+                                            ${vpA !== '' && vpB !== '' ? `Sum: ${(parseFloat(vpA) + parseFloat(vpB)).toFixed(2)}` : 'Sum: 20.00'}
+                                        </div>
+                                    </div>
+
+                                    <!-- Team B Selection & VP -->
+                                    <div class="col-md-5">
+                                        <label class="form-label small fw-bold mb-1 text-danger">Team B (Finalist)</label>
+                                        <select class="form-select form-select-sm fw-bold mb-2" id="br_t2_${t}" data-initial-val="${fix.team2_id || ''}">
+                                            <option value="">-- Select Finalist B --</option>
+                                            ${getSuperLeagueTeamOptions(fix.team2_id, fix.team2_seed)}
+                                        </select>
+                                        <div class="d-flex align-items-center gap-2">
+                                            <label class="small text-muted mb-0 fw-bold" style="white-space:nowrap;">VPs:</label>
+                                            <input type="number" step="0.01" min="0" max="20" class="form-control form-control-sm fw-bold text-center fs-6" id="br_vp2_${t}" placeholder="0.00" value="${vpB}" data-initial-val="${vpB}" oninput="autoBalanceBridgeVp(${t}, 2)">
+                                            <label class="small text-muted mb-0 fw-bold ms-1" style="white-space:nowrap;">IMPs:</label>
+                                            <input type="number" class="form-control form-control-sm text-center" style="max-width: 70px;" id="br_imp2_${t}" placeholder="0" value="${fix.imps_b || 0}" data-initial-val="${fix.imps_b || 0}">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                html += `
+                                </div>
+
+                                <div class="d-flex justify-content-between align-items-center mt-3 pt-3 border-top">
+                                    <span class="text-muted small">
+                                        <i class="fas fa-check-double text-success me-1"></i> Saves Table 1 & Table 2 for Round ${slRomans[activeSuperLeagueRound]}
+                                    </span>
+                                    <button type="submit" class="btn btn-warning fw-bold px-4 py-2 shadow-sm text-dark" id="btnSaveBridgeRound">
+                                        <i class="fas fa-cloud-upload-alt me-1"></i> Save Super League ${slRomans[activeSuperLeagueRound]} Scores
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+
+                    <!-- Live Super League Scoreboard -->
+                    <div class="card shadow-sm border-0 mb-4" style="border-radius: 12px; overflow: hidden;">
+                        <div class="card-header text-white d-flex justify-content-between align-items-center py-2" style="background: linear-gradient(135deg, #b45309, #d97706);">
+                            <div class="fw-bold">
+                                <i class="fas fa-trophy text-warning me-1"></i> 🏆 Super League Finals Live Scoreboard (10th October 2026)
+                            </div>
+                            <span class="badge bg-dark text-white text-uppercase">Top 4 Finalists &bull; 3 Rounds</span>
+                        </div>
+                        <div class="card-body p-0">
+                            <div class="table-responsive">
+                                <table class="table table-bordered table-hover mb-0 text-center align-middle" style="font-size: 0.88rem;">
+                                    <thead class="table-dark">
+                                        <tr>
+                                            <th style="width: 70px;">Rank</th>
+                                            <th style="width: 60px;">Seed</th>
+                                            <th style="text-align: left; min-width: 140px;">Team Name</th>
+                                            <th style="width: 95px;">Prelims VP</th>
+                                            <th style="width: 110px;">SL-I</th>
+                                            <th style="width: 110px;">SL-II</th>
+                                            <th style="width: 110px;">SL-III</th>
+                                            <th style="width: 90px; background-color: #f59e0b; color: #000;">TOTAL VP</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                `;
+
+                // Sort SL matrix by rank
+                const sortedSL = [...slMatrix].sort((a, b) => a.rank - b.rank);
+                sortedSL.forEach(row => {
+                    const qTeam = qualified.find(q => q.seed == row.seed) || {};
+                    const prelimVp = qTeam.total_vp !== undefined ? parseFloat(qTeam.total_vp).toFixed(2) : '-';
+
+                    html += `
+                        <tr class="${row.rank === 1 ? 'table-warning table-opacity-25' : ''}">
+                            <td class="fw-bold fs-6">
+                                ${row.rank === 1 ? '🥇 1st' :
+                                  row.rank === 2 ? '🥈 2nd' :
+                                  row.rank === 3 ? '🥉 3rd' : '4th'}
+                            </td>
+                            <td class="fw-bold text-muted font-monospace">#${row.seed}</td>
+                            <td style="text-align: left;">
+                                <span class="badge me-1" style="background-color: ${row.color_code || '#0284c7'};">${row.short_code}</span>
+                                <strong class="text-dark">${row.name}</strong>
+                            </td>
+                            <td class="font-monospace text-muted small">${prelimVp}</td>
+                    `;
+
+                    for (let r = 1; r <= 3; r++) {
+                        const rnd = row.rounds[r];
+                        if (rnd && rnd.round_vp !== null) {
+                            html += `
+                                <td>
+                                    <div class="fw-bold text-primary font-monospace">${parseFloat(rnd.round_vp).toFixed(2)}</div>
+                                    <small class="text-muted" style="font-size: 0.72rem;">vs ${rnd.opp_code || 'TBD'}</small>
+                                </td>
+                            `;
+                        } else if (rnd && rnd.opp_code) {
+                            html += `
+                                <td>
+                                    <div class="text-muted font-monospace">-</div>
+                                    <small class="text-muted" style="font-size: 0.72rem;">vs ${rnd.opp_code}</small>
+                                </td>
+                            `;
+                        } else {
+                            html += `<td><span class="text-muted small">-</span></td>`;
+                        }
+                    }
+
+                    html += `
+                            <td class="fw-bold font-monospace text-dark fs-6" style="background-color: #fffbeb;">${parseFloat(row.total_vp || 0).toFixed(2)}</td>
+                        </tr>
+                    `;
+                });
+
+                html += `
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="card-footer bg-light p-2 text-muted small d-flex justify-content-between align-items-center">
+                            <span><i class="fas fa-medal text-warning me-1"></i> Medals: 🥇 Gold (1st), 🥈 Silver (2nd), 🥉 Bronze (3rd)</span>
+                            <span>Super League matches played on 10th October 2026</span>
+                        </div>
+                    </div>
+                `;
+
+            } else {
+                // ==========================================
+                // SWISS PRELIMS (Concluded 9th October)
+                // ==========================================
+                const rRomans = { 1: 'R-I', 2: 'R-II', 3: 'R-III', 4: 'R-IV', 5: 'R-V' };
+                const fixtures = (bridgeData.fixtures && bridgeData.fixtures[activeBridgeRound]) ? bridgeData.fixtures[activeBridgeRound] : [];
+                const matrix = bridgeData.matrix || [];
+
+                html += `
+                <!-- Swiss Round Tabs -->
+                <div class="card shadow-sm border-0 mb-3" style="border-radius: 10px;">
+                    <div class="card-body p-2 d-flex flex-wrap justify-content-between align-items-center gap-2">
+                        <div class="btn-group btn-group-sm flex-wrap" role="group">
+                `;
+
+                for (let r = 1; r <= 5; r++) {
+                    const fixes = (bridgeData.fixtures && bridgeData.fixtures[r]) ? bridgeData.fixtures[r] : [];
+                    const isDone = fixes.length > 0 && fixes.every(f => f.status === 'completed');
+                    const isActive = (r === activeBridgeRound);
+
+                    html += `
+                        <button type="button" class="btn ${isActive ? 'btn-primary active fw-bold' : (isDone ? 'btn-outline-success' : 'btn-outline-secondary')} px-3 py-2" onclick="setBridgeRound(${r})">
+                            ${rRomans[r]} ${isDone ? '<i class="fas fa-check ms-1"></i>' : (isActive ? '<span class="badge bg-white text-primary ms-1">Active</span>' : '')}
+                        </button>
+                    `;
+                }
+
+                html += `
                         </div>
                         <span class="badge bg-light text-dark border p-2 small">
-                            <i class="fas fa-info-circle text-primary me-1"></i> 5 Tables &bull; Round ${rRomans[activeBridgeRound]}
+                            <i class="fas fa-info-circle text-primary me-1"></i> 5 Tables &bull; Swiss Round ${rRomans[activeBridgeRound]}
                         </span>
                     </div>
                 </div>
@@ -1790,176 +2164,181 @@ if (session_status() === PHP_SESSION_NONE) {
                     <div class="card-body p-3">
                         <form id="bridgeRoundForm" onsubmit="event.preventDefault(); submitBridgeRound();">
                             <div class="row g-3">
-            `;
+                `;
 
-            // 5 Tables
-            for (let t = 1; t <= 5; t++) {
-                const fix = fixtures.find(f => f.table_no == t) || { table_no: t, team1_num: null, team2_num: null, team1_id: null, team2_id: null, vps_a: '', vps_b: '', imps_a: 0, imps_b: 0, status: 'scheduled', match_id: null };
-                const vpA = fix.vps_a !== null && fix.vps_a !== undefined ? fix.vps_a : '';
-                const vpB = fix.vps_b !== null && fix.vps_b !== undefined ? fix.vps_b : '';
-                const isCompleted = fix.status === 'completed';
+                // 5 Tables
+                for (let t = 1; t <= 5; t++) {
+                    const fix = fixtures.find(f => f.table_no == t) || { table_no: t, team1_num: null, team2_num: null, team1_id: null, team2_id: null, vps_a: '', vps_b: '', imps_a: 0, imps_b: 0, status: 'scheduled', match_id: null };
+                    const vpA = fix.vps_a !== null && fix.vps_a !== undefined ? fix.vps_a : '';
+                    const vpB = fix.vps_b !== null && fix.vps_b !== undefined ? fix.vps_b : '';
+                    const isCompleted = fix.status === 'completed';
+
+                    html += `
+                        <div class="col-12">
+                            <div class="bridge-table-card p-3 ${isCompleted ? 'border-success border-opacity-50 bg-light' : ''}">
+                                <input type="hidden" name="tbl_match_id_${t}" id="br_match_id_${t}" value="${fix.match_id || ''}">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <span class="badge bg-primary px-2 py-1 fw-bold">Table ${t}</span>
+                                    <div class="d-flex align-items-center gap-2">
+                                        <label class="small text-muted fw-bold mb-0">Status:</label>
+                                        <select class="form-select form-select-sm" style="width: 130px;" id="br_status_${t}" data-initial-val="${fix.status || 'scheduled'}">
+                                            <option value="completed" ${fix.status === 'completed' ? 'selected' : ''}>Concluded</option>
+                                            <option value="in_progress" ${fix.status === 'in_progress' ? 'selected' : ''}>In Progress</option>
+                                            <option value="scheduled" ${fix.status === 'scheduled' ? 'selected' : ''}>Scheduled</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div class="row g-2 align-items-center">
+                                    <!-- Team A Selection & VP -->
+                                    <div class="col-md-5">
+                                        <label class="form-label small fw-bold mb-1 text-primary">Team A</label>
+                                        <select class="form-select form-select-sm fw-bold mb-2" id="br_t1_${t}" data-initial-val="${fix.team1_id || ''}">
+                                            <option value="">-- Select Team A --</option>
+                                            ${getCanonicalTeamOptions(fix.team1_id, fix.team1_num)}
+                                        </select>
+                                        <div class="d-flex align-items-center gap-2">
+                                            <label class="small text-muted mb-0 fw-bold" style="white-space:nowrap;">VPs:</label>
+                                            <input type="number" step="0.01" min="0" max="20" class="form-control form-control-sm fw-bold text-center fs-6" id="br_vp1_${t}" placeholder="0.00" value="${vpA}" data-initial-val="${vpA}" oninput="autoBalanceBridgeVp(${t}, 1)">
+                                            <label class="small text-muted mb-0 fw-bold ms-1" style="white-space:nowrap;">IMPs:</label>
+                                            <input type="number" class="form-control form-control-sm text-center" style="max-width: 70px;" id="br_imp1_${t}" placeholder="0" value="${fix.imps_a || 0}" data-initial-val="${fix.imps_a || 0}">
+                                        </div>
+                                    </div>
+
+                                    <!-- VS Badge -->
+                                    <div class="col-md-2 text-center my-2 my-md-0">
+                                        <span class="badge bg-secondary p-2 fw-bold font-monospace">VS</span>
+                                        <div class="small text-muted mt-1" id="br_sum_${t}" style="font-size: 0.72rem;">
+                                            ${vpA !== '' && vpB !== '' ? `Sum: ${(parseFloat(vpA) + parseFloat(vpB)).toFixed(2)}` : 'Sum: 20.00'}
+                                        </div>
+                                    </div>
+
+                                    <!-- Team B Selection & VP -->
+                                    <div class="col-md-5">
+                                        <label class="form-label small fw-bold mb-1 text-danger">Team B</label>
+                                        <select class="form-select form-select-sm fw-bold mb-2" id="br_t2_${t}" data-initial-val="${fix.team2_id || ''}">
+                                            <option value="">-- Select Team B --</option>
+                                            ${getCanonicalTeamOptions(fix.team2_id, fix.team2_num)}
+                                        </select>
+                                        <div class="d-flex align-items-center gap-2">
+                                            <label class="small text-muted mb-0 fw-bold" style="white-space:nowrap;">VPs:</label>
+                                            <input type="number" step="0.01" min="0" max="20" class="form-control form-control-sm fw-bold text-center fs-6" id="br_vp2_${t}" placeholder="0.00" value="${vpB}" data-initial-val="${vpB}" oninput="autoBalanceBridgeVp(${t}, 2)">
+                                            <label class="small text-muted mb-0 fw-bold ms-1" style="white-space:nowrap;">IMPs:</label>
+                                            <input type="number" class="form-control form-control-sm text-center" style="max-width: 70px;" id="br_imp2_${t}" placeholder="0" value="${fix.imps_b || 0}" data-initial-val="${fix.imps_b || 0}">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
 
                 html += `
-                    <div class="col-12">
-                        <div class="bridge-table-card p-3 ${isCompleted ? 'border-success border-opacity-50 bg-light' : ''}">
-                            <input type="hidden" name="tbl_match_id_${t}" id="br_match_id_${t}" value="${fix.match_id || ''}">
-                            <div class="d-flex justify-content-between align-items-center mb-2">
-                                <span class="badge bg-primary px-2 py-1 fw-bold">Table ${t}</span>
-                                <div class="d-flex align-items-center gap-2">
-                                    <label class="small text-muted fw-bold mb-0">Status:</label>
-                                    <select class="form-select form-select-sm" style="width: 130px;" id="br_status_${t}">
-                                        <option value="completed" ${fix.status === 'completed' ? 'selected' : ''}>Concluded</option>
-                                        <option value="in_progress" ${fix.status === 'in_progress' ? 'selected' : ''}>In Progress</option>
-                                        <option value="scheduled" ${fix.status === 'scheduled' ? 'selected' : ''}>Scheduled</option>
-                                    </select>
                                 </div>
+
+                                <div class="d-flex justify-content-between align-items-center mt-3 pt-3 border-top">
+                                    <span class="text-muted small">
+                                        <i class="fas fa-check-double text-success me-1"></i> Saves all 5 tables for Round ${rRomans[activeBridgeRound]}
+                                    </span>
+                                    <button type="submit" class="btn btn-success fw-bold px-4 py-2 shadow-sm" id="btnSaveBridgeRound">
+                                        <i class="fas fa-cloud-upload-alt me-1"></i> Save Round ${rRomans[activeBridgeRound]} Scores
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+
+                    <!-- Live Consolidated Scoreboard Matrix -->
+                    <div class="card shadow-sm border-0 mb-4" style="border-radius: 12px; overflow: hidden;">
+                        <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center py-2">
+                            <div class="fw-bold">
+                                <i class="fas fa-table text-warning me-1"></i> Live Consolidated Scoreboard (Whiteboard Matrix)
                             </div>
+                            <span class="badge bg-primary text-uppercase">10 Teams &bull; Continuous 20-VP Scale</span>
+                        </div>
+                        <div class="card-body p-0">
+                            <div class="table-responsive">
+                                <table class="bridge-matrix-tbl">
+                                    <thead>
+                                        <tr>
+                                            <th style="width: 50px;">No.</th>
+                                            <th style="text-align: left; min-width: 130px;">Team Name</th>
+                                            <th style="width: 90px;">R-I</th>
+                                            <th style="width: 90px;">R-II</th>
+                                            <th style="width: 90px;">R-III</th>
+                                            <th style="width: 90px;">R-IV</th>
+                                            <th style="width: 90px;">R-V</th>
+                                            <th style="width: 80px;">TOTAL</th>
+                                            <th style="width: 60px;">RANK</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                `;
 
-                            <div class="row g-2 align-items-center">
-                                <!-- Team A Selection & VP -->
-                                <div class="col-md-5">
-                                    <label class="form-label small fw-bold mb-1 text-primary">Team A</label>
-                                    <select class="form-select form-select-sm fw-bold mb-2" id="br_t1_${t}">
-                                        <option value="">-- Select Team A --</option>
-                                        ${getCanonicalTeamOptions(fix.team1_id, fix.team1_num)}
-                                    </select>
-                                    <div class="d-flex align-items-center gap-2">
-                                        <label class="small text-muted mb-0 fw-bold" style="white-space:nowrap;">VPs:</label>
-                                        <input type="number" step="0.01" min="0" max="20" class="form-control form-control-sm fw-bold text-center fs-6" id="br_vp1_${t}" placeholder="0.00" value="${vpA}" oninput="autoBalanceBridgeVp(${t}, 1)">
-                                        <label class="small text-muted mb-0 fw-bold ms-1" style="white-space:nowrap;">IMPs:</label>
-                                        <input type="number" class="form-control form-control-sm text-center" style="max-width: 70px;" id="br_imp1_${t}" placeholder="0" value="${fix.imps_a || 0}">
-                                    </div>
-                                </div>
+                // Sort matrix by team_no 1 to 10 for official scoreboard view
+                const sortedMatrix = [...matrix].sort((a, b) => a.team_no - b.team_no);
+                sortedMatrix.forEach(row => {
+                    html += `
+                        <tr>
+                            <td class="fw-bold text-primary font-monospace">${row.team_no}</td>
+                            <td style="text-align: left;">
+                                <span class="badge me-1" style="background-color: ${row.color_code || '#0284c7'}; font-size: 0.72rem;">${row.short_code}</span>
+                                <strong class="text-dark">${row.name}</strong>
+                                ${row.rank <= 4 ? '<span class="badge bg-success ms-1" style="font-size: 0.65rem;">Q</span>' : ''}
+                            </td>
+                    `;
 
-                                <!-- VS Badge -->
-                                <div class="col-md-2 text-center my-2 my-md-0">
-                                    <span class="badge bg-secondary p-2 fw-bold font-monospace">VS</span>
-                                    <div class="small text-muted mt-1" id="br_sum_${t}" style="font-size: 0.72rem;">
-                                        ${vpA !== '' && vpB !== '' ? `Sum: ${(parseFloat(vpA) + parseFloat(vpB)).toFixed(2)}` : 'Sum: 20.00'}
+                    for (let r = 1; r <= 5; r++) {
+                        const rnd = row.rounds[r];
+                        if (rnd && rnd.cum_vp !== null) {
+                            html += `
+                                <td>
+                                    <div class="bridge-cell-split" title="Round ${r}: ${rnd.round_vp !== null ? '+' + parseFloat(rnd.round_vp).toFixed(2) + ' VP' : ''} vs Team #${rnd.opp_no}">
+                                        <div class="bridge-cell-cum-vp">${parseFloat(rnd.cum_vp).toFixed(2)}</div>
+                                        <div class="bridge-cell-opp-no">${rnd.opp_no}</div>
                                     </div>
-                                </div>
+                                </td>
+                            `;
+                        } else if (rnd && rnd.opp_no) {
+                            html += `
+                                <td>
+                                    <div class="bridge-cell-split" title="Scheduled vs Team #${rnd.opp_no}">
+                                        <div class="bridge-cell-cum-vp" style="color: #94a3b8;">-</div>
+                                        <div class="bridge-cell-opp-no">${rnd.opp_no}</div>
+                                    </div>
+                                </td>
+                            `;
+                        } else {
+                            html += `<td><div class="bridge-cell-empty"></div></td>`;
+                        }
+                    }
 
-                                <!-- Team B Selection & VP -->
-                                <div class="col-md-5">
-                                    <label class="form-label small fw-bold mb-1 text-danger">Team B</label>
-                                    <select class="form-select form-select-sm fw-bold mb-2" id="br_t2_${t}">
-                                        <option value="">-- Select Team B --</option>
-                                        ${getCanonicalTeamOptions(fix.team2_id, fix.team2_num)}
-                                    </select>
-                                    <div class="d-flex align-items-center gap-2">
-                                        <label class="small text-muted mb-0 fw-bold" style="white-space:nowrap;">VPs:</label>
-                                        <input type="number" step="0.01" min="0" max="20" class="form-control form-control-sm fw-bold text-center fs-6" id="br_vp2_${t}" placeholder="0.00" value="${vpB}" oninput="autoBalanceBridgeVp(${t}, 2)">
-                                        <label class="small text-muted mb-0 fw-bold ms-1" style="white-space:nowrap;">IMPs:</label>
-                                        <input type="number" class="form-control form-control-sm text-center" style="max-width: 70px;" id="br_imp2_${t}" placeholder="0" value="${fix.imps_b || 0}">
-                                    </div>
-                                </div>
+                    html += `
+                            <td class="fw-bold font-monospace text-primary fs-6">${parseFloat(row.total_vp || 0).toFixed(2)}</td>
+                            <td>
+                                ${row.rank === 1 ? '<span class="badge bg-warning text-dark"><i class="fas fa-crown"></i> 1</span>' :
+                                  row.rank === 2 ? '<span class="badge bg-secondary">2</span>' :
+                                  row.rank === 3 ? '<span class="badge bg-danger">3</span>' :
+                                  `<span class="text-muted fw-bold">${row.rank}</span>`}
+                            </td>
+                        </tr>
+                    `;
+                });
+
+                html += `
+                                    </tbody>
+                                </table>
                             </div>
+                        </div>
+                        <div class="card-footer bg-light p-2 text-muted small d-flex justify-content-between align-items-center">
+                            <span><i class="fas fa-info-circle me-1 text-info"></i> Diagonal split: Top-Left = Cumulative VPs, Bottom-Right = Opponent Team #</span>
+                            <span>Sum of both teams per round = 20.00 VPs &bull; Top 4 Advance to Super League</span>
                         </div>
                     </div>
                 `;
             }
 
             html += `
-                            </div>
-
-                            <div class="d-flex justify-content-between align-items-center mt-3 pt-3 border-top">
-                                <span class="text-muted small">
-                                    <i class="fas fa-check-double text-success me-1"></i> Saves all 5 tables for Round ${rRomans[activeBridgeRound]}
-                                </span>
-                                <button type="submit" class="btn btn-success fw-bold px-4 py-2 shadow-sm" id="btnSaveBridgeRound">
-                                    <i class="fas fa-cloud-upload-alt me-1"></i> Save Round ${rRomans[activeBridgeRound]} Scores
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-
-                <!-- Live Consolidated Scoreboard Matrix -->
-                <div class="card shadow-sm border-0 mb-4" style="border-radius: 12px; overflow: hidden;">
-                    <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center py-2">
-                        <div class="fw-bold">
-                            <i class="fas fa-table text-warning me-1"></i> Live Consolidated Scoreboard (Whiteboard Matrix)
-                        </div>
-                        <span class="badge bg-primary text-uppercase">10 Teams &bull; Continuous 20-VP Scale</span>
-                    </div>
-                    <div class="card-body p-0">
-                        <div class="table-responsive">
-                            <table class="bridge-matrix-tbl">
-                                <thead>
-                                    <tr>
-                                        <th style="width: 50px;">No.</th>
-                                        <th style="text-align: left; min-width: 130px;">Team Name</th>
-                                        <th style="width: 90px;">R-I</th>
-                                        <th style="width: 90px;">R-II</th>
-                                        <th style="width: 90px;">R-III</th>
-                                        <th style="width: 90px;">R-IV</th>
-                                        <th style="width: 90px;">R-V</th>
-                                        <th style="width: 80px;">TOTAL</th>
-                                        <th style="width: 60px;">RANK</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-            `;
-
-            // Sort matrix by team_no 1 to 10 for the official scoreboard view
-            const sortedMatrix = [...matrix].sort((a, b) => a.team_no - b.team_no);
-            sortedMatrix.forEach(row => {
-                html += `
-                    <tr>
-                        <td class="fw-bold text-primary font-monospace">${row.team_no}</td>
-                        <td style="text-align: left;">
-                            <span class="badge me-1" style="background-color: ${row.color_code || '#0284c7'}; font-size: 0.72rem;">${row.short_code}</span>
-                            <strong class="text-dark">${row.name}</strong>
-                        </td>
-                `;
-
-                for (let r = 1; r <= 5; r++) {
-                    const rnd = row.rounds[r];
-                    if (rnd && rnd.cum_vp !== null) {
-                        html += `
-                            <td>
-                                <div class="bridge-cell-split" title="Round ${r}: ${rnd.round_vp !== null ? '+' + parseFloat(rnd.round_vp).toFixed(2) + ' VP' : ''} vs Team #${rnd.opp_no}">
-                                    <div class="bridge-cell-cum-vp">${parseFloat(rnd.cum_vp).toFixed(2)}</div>
-                                    <div class="bridge-cell-opp-no">${rnd.opp_no}</div>
-                                </div>
-                            </td>
-                        `;
-                    } else if (rnd && rnd.opp_no) {
-                        html += `
-                            <td>
-                                <div class="bridge-cell-split" title="Scheduled vs Team #${rnd.opp_no}">
-                                    <div class="bridge-cell-cum-vp" style="color: #94a3b8;">-</div>
-                                    <div class="bridge-cell-opp-no">${rnd.opp_no}</div>
-                                </div>
-                            </td>
-                        `;
-                    } else {
-                        html += `<td><div class="bridge-cell-empty"></div></td>`;
-                    }
-                }
-
-                html += `
-                        <td class="fw-bold font-monospace text-primary fs-6">${parseFloat(row.total_vp || 0).toFixed(2)}</td>
-                        <td>
-                            ${row.rank === 1 ? '<span class="badge bg-warning text-dark"><i class="fas fa-crown"></i> 1</span>' :
-                              row.rank === 2 ? '<span class="badge bg-secondary">2</span>' :
-                              row.rank === 3 ? '<span class="badge bg-danger">3</span>' :
-                              `<span class="text-muted fw-bold">${row.rank}</span>`}
-                        </td>
-                    </tr>
-                `;
-            });
-
-            html += `
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                    <div class="card-footer bg-light p-2 text-muted small d-flex justify-content-between align-items-center">
-                        <span><i class="fas fa-info-circle me-1 text-info"></i> Diagonal split: Top-Left = Cumulative VPs, Bottom-Right = Opponent Team #</span>
-                        <span>Sum of both teams per round = 20.00 VPs</span>
-                    </div>
-                </div>
             </div>
             `;
 
@@ -1968,15 +2347,24 @@ if (session_status() === PHP_SESSION_NONE) {
 
         // Initialize
         const urlParams = new URLSearchParams(window.location.search);
+        const filterEl = document.getElementById('sportFilter');
         if (urlParams.get('sport') === 'bridge' || urlParams.get('discipline') === 'bridge') {
-            const filterEl = document.getElementById('sportFilter');
             if (filterEl) filterEl.value = 'bridge';
+        } else if (!urlParams.get('sport') && filterEl) {
+            <?php if (isset($_SESSION['full_name']) && stripos($_SESSION['full_name'], 'bridge') !== false): ?>
+                filterEl.value = 'bridge';
+            <?php endif; ?>
         }
+        previousSportFilter = document.getElementById('sportFilter')?.value || 'all';
 
         updateNetworkStatus();
-        fetchMatches();
+        if (previousSportFilter === 'bridge') {
+            renderMatches();
+        } else {
+            fetchMatches();
+        }
         checkPendingSync();
-        setInterval(fetchMatches, 15000); // 15s auto-poll for schedule updates
+        setInterval(handleAutoPoll, 15000); // 15s auto-poll for schedule updates (skips Bridge to avoid resetting scores)
     </script>
 </body>
 </html>

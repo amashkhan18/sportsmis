@@ -103,7 +103,8 @@ foreach ($autoLeaderboard as $alb) {
         'points' => (int)($alb['total_points'] ?? 0),
         'gold' => (int)($alb['gold'] ?? 0),
         'silver' => (int)($alb['silver'] ?? 0),
-        'bronze' => (int)($alb['bronze'] ?? 0)
+        'bronze' => (int)($alb['bronze'] ?? 0),
+        'notes' => !empty($alb['game_breakdown']) ? implode('; ', $alb['game_breakdown']) : ''
     ];
 }
 
@@ -468,21 +469,28 @@ function syncFromAutoResults() {
         return;
     }
 
+    let populatedCount = 0;
     for (const [unitId, data] of Object.entries(autoResults)) {
         const rankInput = document.getElementById('rank_' + unitId);
         const ptsInput = document.getElementById('points_' + unitId);
         const goldInput = document.getElementById('gold_' + unitId);
         const silverInput = document.getElementById('silver_' + unitId);
         const bronzeInput = document.getElementById('bronze_' + unitId);
+        const notesInput = document.getElementById('notes_' + unitId);
 
         if (rankInput) rankInput.value = data.rank || '';
         if (ptsInput) ptsInput.value = data.points || 0;
         if (goldInput) goldInput.value = data.gold || 0;
         if (silverInput) silverInput.value = data.silver || 0;
         if (bronzeInput) bronzeInput.value = data.bronze || 0;
+        if (notesInput) notesInput.value = data.notes || '';
+
+        if ((data.points && data.points > 0) || data.rank) {
+            populatedCount++;
+        }
     }
 
-    alert("Leaderboard inputs populated with match results. Please review and click 'Save Manual Leaderboard' to commit.");
+    alert("Leaderboard inputs populated with match results (" + populatedCount + " units with active points/medals). Please review and click 'Save Manual Leaderboard' to commit.");
 }
 
 function clearAllManual() {

@@ -34,7 +34,7 @@ $stmt = $pdo->prepare("
     LEFT JOIN teams tw ON m.winner_id = tw.id
     LEFT JOIN facilities f ON m.facility_id = f.id
     WHERE m.game_id = ? AND m.is_published = 1
-    ORDER BY FIELD(m.status, 'in_progress', 'scheduled', 'completed'), m.match_date ASC, m.start_time ASC
+    ORDER BY FIELD(m.status, 'in_progress', 'completed', 'scheduled'), m.match_date ASC, m.start_time ASC
 ");
 $stmt->execute([$game['id']]);
 $gameMatches = $stmt->fetchAll();
@@ -48,6 +48,7 @@ if ($sportCategoryType === 'swimming') {
 } elseif ($sportCategoryType === 'bridge') {
     $bridgeStandings = get_bridge_discipline_standings($pdo, $game['id']);
     $bridgeSwissData = get_bridge_swiss_matrix($pdo, $game['id']);
+    $bridgeSuperLeagueData = get_bridge_super_league_data($pdo, $game['id']);
 } else {
     $poolStandings = get_pool_standings($pdo, $game['id']);
 }
@@ -300,8 +301,8 @@ $teamsList = $stmt->fetchAll();
         }
         .bridge-cell-split {
             position: relative;
-            width: 82px;
-            height: 54px;
+            width: 88px;
+            height: 56px;
             background: rgba(15, 23, 42, 0.75);
             border: 1px solid rgba(255, 255, 255, 0.18);
             border-radius: 6px;
@@ -322,12 +323,12 @@ $teamsList = $stmt->fetchAll();
             left: 0;
             width: 100%;
             height: 100%;
-            background: linear-gradient(to bottom right, transparent calc(50% - 1px), rgba(255, 255, 255, 0.35) 50%, transparent calc(50% + 1px));
+            background: linear-gradient(to bottom right, transparent calc(50% - 1px), rgba(255, 255, 255, 0.28) 50%, transparent calc(50% + 1px));
             pointer-events: none;
         }
         .bridge-cell-cum-vp {
             position: absolute;
-            top: 3px;
+            top: 4px;
             left: 6px;
             font-weight: 800;
             font-size: 0.95rem;
@@ -335,12 +336,22 @@ $teamsList = $stmt->fetchAll();
             font-family: monospace;
             line-height: 1;
         }
+        .bridge-cell-round-vp {
+            position: absolute;
+            bottom: 4px;
+            left: 6px;
+            font-weight: 700;
+            font-size: 0.72rem;
+            color: #4ade80;
+            font-family: monospace;
+            line-height: 1;
+        }
         .bridge-cell-opp-no {
             position: absolute;
-            bottom: 3px;
+            bottom: 4px;
             right: 6px;
             font-weight: 800;
-            font-size: 0.8rem;
+            font-size: 0.78rem;
             color: #f59e0b;
             background: rgba(245, 158, 11, 0.15);
             padding: 1px 5px;
@@ -350,8 +361,8 @@ $teamsList = $stmt->fetchAll();
         }
         .bridge-cell-empty {
             position: relative;
-            width: 82px;
-            height: 54px;
+            width: 88px;
+            height: 56px;
             background: rgba(15, 23, 42, 0.35);
             border: 1px dashed rgba(255, 255, 255, 0.12);
             border-radius: 6px;
@@ -574,15 +585,22 @@ $teamsList = $stmt->fetchAll();
 
             <?php if ($game_slug === 'bridge'): ?>
                 <?php
+                    // Swiss Prelims data
                     $matrixRows = $bridgeSwissData['matrix'] ?? [];
                     $fixturesByRound = $bridgeSwissData['fixtures'] ?? [];
-                    
-                    // Sort by team_no 1 to 10 for the official scoreboard sheet view
                     usort($matrixRows, function($a, $b) {
                         return $a['team_no'] <=> $b['team_no'];
                     });
 
-                    // Top leaders for highlight cards
+                    // Super League Finals data (Top 4 Contenders - 10th October 2026)
+                    $slMatrixRows = $bridgeSuperLeagueData['matrix'] ?? [];
+                    $slFixturesByRound = $bridgeSuperLeagueData['fixtures'] ?? [];
+                    $slQualified = $bridgeSuperLeagueData['qualified_teams'] ?? [];
+                    usort($slMatrixRows, function($a, $b) {
+                        return $a['seed'] <=> $b['seed'];
+                    });
+
+                    // Top leaders from Swiss for highlight cards
                     $leaderList = $matrixRows;
                     usort($leaderList, function($a, $b) {
                         return $a['rank'] <=> $b['rank'];
@@ -592,222 +610,513 @@ $teamsList = $stmt->fetchAll();
                     $leader3 = $leaderList[2] ?? null;
                 ?>
                 <div class="col-12 mb-2">
-                    <!-- Top Podium Highlights -->
-                    <div class="row g-3 mb-4">
-                        <div class="col-md-4">
-                            <div class="dashboard-glass-card p-3 border-warning border-opacity-50 text-center">
-                                <span class="badge bg-warning text-dark px-3 py-1 mb-2 fw-bold"><i class="fas fa-crown me-1"></i> Current Leader (Rank 1)</span>
-                                <h4 class="fw-bold text-white mb-0"><?= htmlspecialchars($leader1['name'] ?? 'TBD') ?></h4>
-                                <span class="fs-4 fw-bold text-warning"><?= number_format($leader1['total_vp'] ?? 0, 2) ?> <small class="fs-6 text-white-50">VPs</small></span>
-                            </div>
-                        </div>
-                        <div class="col-md-4">
-                            <div class="dashboard-glass-card p-3 border-secondary border-opacity-50 text-center">
-                                <span class="badge bg-secondary text-white px-3 py-1 mb-2 fw-bold"><i class="fas fa-medal me-1"></i> 2nd Position</span>
-                                <h4 class="fw-bold text-white mb-0"><?= htmlspecialchars($leader2['name'] ?? 'TBD') ?></h4>
-                                <span class="fs-4 fw-bold text-info"><?= number_format($leader2['total_vp'] ?? 0, 2) ?> <small class="fs-6 text-white-50">VPs</small></span>
-                            </div>
-                        </div>
-                        <div class="col-md-4">
-                            <div class="dashboard-glass-card p-3 border-danger border-opacity-50 text-center">
-                                <span class="badge bg-danger text-white px-3 py-1 mb-2 fw-bold"><i class="fas fa-award me-1"></i> 3rd Position</span>
-                                <h4 class="fw-bold text-white mb-0"><?= htmlspecialchars($leader3['name'] ?? 'TBD') ?></h4>
-                                <span class="fs-4 fw-bold text-light"><?= number_format($leader3['total_vp'] ?? 0, 2) ?> <small class="fs-6 text-white-50">VPs</small></span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Master Consolidated Scoreboard Card -->
-                    <div class="bridge-matrix-card p-4 mb-4">
-                        <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-3">
+                    <!-- Stage Switcher Tabs -->
+                    <div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-4 p-3 rounded-4" style="background: rgba(15, 23, 42, 0.92); border: 1px solid rgba(255,255,255,0.18); box-shadow: 0 8px 30px rgba(0,0,0,0.5);">
+                        <div class="d-flex align-items-center gap-3">
+                            <div class="badge bg-warning text-dark p-2 fs-5"><i class="fas fa-trophy"></i></div>
                             <div>
-                                <span class="badge bg-warning text-dark text-uppercase px-3 py-1 fw-bold mb-1">Official Tournament Matrix</span>
-                                <h3 class="fw-bold text-white mb-0">
-                                    <i class="fas fa-clone text-info me-2"></i> HPCL ALL INDIA INTER UNIT SPORTS & GAMES TOURNAMENT 2026
-                                </h3>
-                                <div class="text-white-50 small mt-1">BRIDGE CONSOLIDATED SCOREBOARD • WBF Continuous 20-VP Scale</div>
-                            </div>
-                            <div class="d-flex flex-wrap gap-2">
-                                <span class="bridge-legend-badge">
-                                    <span class="text-info fw-bold me-1">Top-Left:</span> Cumulative VPs
-                                </span>
-                                <span class="bridge-legend-badge">
-                                    <span class="text-warning fw-bold me-1">Bottom-Right:</span> Opponent Team #
-                                </span>
-                                <span class="bridge-legend-badge">
-                                    <span class="text-success fw-bold me-1">Match VP Sum:</span> 20.00
-                                </span>
+                                <h4 class="fw-bold text-white mb-0">Bridge Championship 2026</h4>
+                                <small class="text-white-50">HPCL All India Inter Unit Sports & Games &bull; 10-Unit Swiss League & Top-4 Super League Finals</small>
                             </div>
                         </div>
-
-                        <div class="bridge-table-wrapper">
-                            <table class="bridge-matrix-tbl">
-                                <thead>
-                                    <tr>
-                                        <th style="width: 75px;">Team No.</th>
-                                        <th style="text-align: left; min-width: 170px;">Team Name</th>
-                                        <th style="width: 110px;">R-I</th>
-                                        <th style="width: 110px;">R-II</th>
-                                        <th style="width: 110px;">R-III</th>
-                                        <th style="width: 110px;">R-IV</th>
-                                        <th style="width: 110px;">R-V</th>
-                                        <th style="width: 110px;">TOTAL</th>
-                                        <th style="width: 80px;">RANK</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php foreach ($matrixRows as $row): 
-                                        $isFirst = ($row['rank'] === 1);
-                                    ?>
-                                        <tr class="<?= $isFirst ? 'leader-row' : '' ?>">
-                                            <td class="text-center font-monospace fw-bold text-warning fs-5">
-                                                <?= $row['team_no'] ?>
-                                            </td>
-                                            <td>
-                                                <div class="d-flex align-items-center">
-                                                    <span class="badge me-2 px-2 py-1" style="background-color: <?= $row['color_code'] ?>; color: #fff; font-size: 0.78rem; font-weight: 700;">
-                                                        <?= htmlspecialchars($row['short_code']) ?>
-                                                    </span>
-                                                    <div>
-                                                        <div class="fw-bold text-white"><?= htmlspecialchars($row['name']) ?></div>
-                                                        <div class="text-white-50 small" style="font-size: 0.75rem;"><?= htmlspecialchars($row['full_name']) ?></div>
-                                                    </div>
-                                                </div>
-                                            </td>
-
-                                            <?php for ($r = 1; $r <= 5; $r++): 
-                                                $rnd = $row['rounds'][$r];
-                                                $hasScore = ($rnd['cum_vp'] !== null);
-                                            ?>
-                                                <td class="text-center">
-                                                    <?php if ($hasScore): ?>
-                                                        <div class="bridge-cell-split" title="Round <?= $r ?>: <?= $rnd['round_vp'] !== null ? '+' . number_format($rnd['round_vp'], 2) . ' VP' : '' ?> vs Team #<?= $rnd['opp_no'] ?>">
-                                                            <div class="bridge-cell-cum-vp"><?= number_format($rnd['cum_vp'], 2) ?></div>
-                                                            <div class="bridge-cell-opp-no"><?= $rnd['opp_no'] ?></div>
-                                                        </div>
-                                                    <?php elseif ($rnd['opp_no']): ?>
-                                                        <div class="bridge-cell-split" title="Scheduled: vs Team #<?= $rnd['opp_no'] ?>">
-                                                            <div class="bridge-cell-cum-vp" style="color: #64748b;">-</div>
-                                                            <div class="bridge-cell-opp-no"><?= $rnd['opp_no'] ?></div>
-                                                        </div>
-                                                    <?php else: ?>
-                                                        <div class="bridge-cell-empty" title="Round <?= $r ?> pending"></div>
-                                                    <?php endif; ?>
-                                                </td>
-                                            <?php endfor; ?>
-
-                                            <td class="text-center">
-                                                <span class="fs-5 fw-bold font-monospace text-info">
-                                                    <?= number_format($row['total_vp'], 2) ?>
-                                                </span>
-                                            </td>
-                                            <td class="text-center">
-                                                <?php if ($row['rank'] === 1): ?>
-                                                    <span class="badge bg-warning text-dark px-2 py-1 fs-6 fw-bold"><i class="fas fa-crown"></i> 1</span>
-                                                <?php elseif ($row['rank'] === 2): ?>
-                                                    <span class="badge bg-secondary text-white px-2 py-1 fs-6 fw-bold"><i class="fas fa-medal"></i> 2</span>
-                                                <?php elseif ($row['rank'] === 3): ?>
-                                                    <span class="badge bg-danger text-white px-2 py-1 fs-6 fw-bold"><i class="fas fa-award"></i> 3</span>
-                                                <?php else: ?>
-                                                    <span class="text-white-50 fw-bold fs-6"><?= $row['rank'] ?></span>
-                                                <?php endif; ?>
-                                            </td>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                            </table>
-                        </div>
+                        <ul class="nav nav-pills gap-2" id="bridgeStageTabs" role="tablist">
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link active fw-bold px-3 py-2 text-uppercase" id="pill-super-league-tab" data-bs-toggle="pill" data-bs-target="#pill-super-league" type="button" style="border-radius: 8px;">
+                                    <i class="fas fa-crown text-warning me-1"></i> Super League Finals (10 Oct)
+                                    <span class="badge bg-danger ms-1">Top 4</span>
+                                </button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link fw-bold px-3 py-2 text-uppercase" id="pill-swiss-league-tab" data-bs-toggle="pill" data-bs-target="#pill-swiss-league" type="button" style="border-radius: 8px;">
+                                    <i class="fas fa-table me-1 text-info"></i> Swiss League Prelims
+                                    <span class="badge bg-success ms-1">Concluded</span>
+                                </button>
+                            </li>
+                        </ul>
                     </div>
 
-                    <!-- Round-Wise Encounters / Matches Tabs -->
-                    <div class="dashboard-glass-card p-4 mb-4">
-                        <h4 class="fw-bold text-white mb-3">
-                            <i class="fas fa-stream text-primary me-2"></i> Round-by-Round Table Encounters
-                        </h4>
-                        
-                        <ul class="nav nav-pills mb-3 gap-2" id="bridgeRoundPills" role="tablist">
-                            <?php 
-                            $rRoman = [1 => 'R-I', 2 => 'R-II', 3 => 'R-III', 4 => 'R-IV', 5 => 'R-V'];
-                            for ($r = 1; $r <= 5; $r++): 
-                                $isCompleted = false;
-                                foreach ($fixturesByRound[$r] ?? [] as $fix) {
-                                    if ($fix['status'] === 'completed') $isCompleted = true;
-                                }
-                            ?>
-                                <li class="nav-item" role="presentation">
-                                    <button class="nav-link <?= $r === 1 ? 'active' : '' ?> fw-bold px-3 py-2" id="pill-round-<?= $r ?>-tab" data-bs-toggle="pill" data-bs-target="#pill-round-<?= $r ?>" type="button">
-                                        <?= $rRoman[$r] ?> 
-                                        <?php if ($isCompleted): ?>
-                                            <span class="badge bg-success ms-1"><i class="fas fa-check"></i></span>
-                                        <?php else: ?>
-                                            <span class="badge bg-secondary ms-1">5 Tables</span>
-                                        <?php endif; ?>
-                                    </button>
-                                </li>
-                            <?php endfor; ?>
-                        </ul>
-
-                        <div class="tab-content" id="bridgeRoundPillsContent">
-                            <?php for ($r = 1; $r <= 5; $r++): ?>
-                                <div class="tab-pane fade <?= $r === 1 ? 'show active' : '' ?>" id="pill-round-<?= $r ?>">
-                                    <div class="row g-3">
-                                        <?php foreach ($fixturesByRound[$r] ?? [] as $f): 
-                                            $isDone = ($f['status'] === 'completed');
-                                        ?>
-                                            <div class="col-md-6 col-lg-4">
-                                                <div class="p-3 rounded border" style="background: rgba(15, 23, 42, 0.6); border-color: rgba(255,255,255,0.1) !important;">
-                                                    <div class="d-flex justify-content-between align-items-center mb-2">
-                                                        <span class="badge bg-primary">Table <?= $f['table_no'] ?></span>
-                                                        <?php if ($isDone): ?>
-                                                            <span class="badge bg-success"><i class="fas fa-check me-1"></i> Concluded</span>
-                                                        <?php elseif ($f['status'] === 'in_progress'): ?>
-                                                            <span class="badge bg-danger pulse-animation">Live Scoring</span>
-                                                        <?php else: ?>
-                                                            <span class="badge bg-secondary">Scheduled</span>
-                                                        <?php endif; ?>
-                                                    </div>
-
-                                                    <div class="d-flex justify-content-between align-items-center text-center my-2">
-                                                        <div style="width: 44%;">
-                                                            <span class="badge mb-1 px-2 py-1" style="background-color: <?= $f['team1_color'] ?>;">
-                                                                #<?= $f['team1_num'] ?: '?' ?> <?= htmlspecialchars($f['team1_code']) ?>
-                                                            </span>
-                                                            <div class="fw-bold text-white small text-truncate"><?= htmlspecialchars($f['team1_name']) ?></div>
-                                                            <?php if ($isDone): ?>
-                                                                <div class="fs-5 fw-bold text-info font-monospace mt-1"><?= number_format($f['vps_a'] ?? 0, 2) ?> VP</div>
-                                                            <?php endif; ?>
-                                                        </div>
-                                                        
-                                                        <div class="text-white-50 fw-bold small">VS</div>
-
-                                                        <div style="width: 44%;">
-                                                            <span class="badge mb-1 px-2 py-1" style="background-color: <?= $f['team2_color'] ?>;">
-                                                                #<?= $f['team2_num'] ?: '?' ?> <?= htmlspecialchars($f['team2_code']) ?>
-                                                            </span>
-                                                            <div class="fw-bold text-white small text-truncate"><?= htmlspecialchars($f['team2_name']) ?></div>
-                                                            <?php if ($isDone): ?>
-                                                                <div class="fs-5 fw-bold text-info font-monospace mt-1"><?= number_format($f['vps_b'] ?? 0, 2) ?> VP</div>
-                                                            <?php endif; ?>
-                                                        </div>
-                                                    </div>
-
-                                                    <?php if ($isDone && $f['winner_id']): ?>
-                                                        <div class="text-center mt-2 pt-2 border-top border-secondary border-opacity-25 small text-warning fw-semibold">
-                                                            <i class="fas fa-trophy me-1"></i> Winner: <?= $f['winner_id'] == $f['team1_id'] ? $f['team1_name'] : $f['team2_name'] ?>
-                                                        </div>
-                                                    <?php elseif ($isDone && !$f['winner_id']): ?>
-                                                        <div class="text-center mt-2 pt-2 border-top border-secondary border-opacity-25 small text-info fw-semibold">
-                                                            <i class="fas fa-handshake me-1"></i> Match Tied (10.00 - 10.00 VPs)
-                                                        </div>
-                                                    <?php endif; ?>
-                                                </div>
+                    <div class="tab-content" id="bridgeStageTabsContent">
+                        <!-- ============================================== -->
+                        <!-- STAGE 1: SUPER LEAGUE FINALS (10TH OCTOBER 2026) -->
+                        <!-- ============================================== -->
+                        <div class="tab-pane fade show active" id="pill-super-league" role="tabpanel">
+                            <!-- 4 Finalist Cards -->
+                            <div class="row g-3 mb-4">
+                                <?php foreach ($slMatrixRows as $tm): 
+                                    $medIcon = $tm['rank'] === 1 ? 'fa-crown text-warning' : ($tm['rank'] === 2 ? 'fa-medal text-secondary' : ($tm['rank'] === 3 ? 'fa-award text-danger' : 'fa-star text-info'));
+                                    $medLabel = $tm['rank'] === 1 ? 'Gold Contender' : ($tm['rank'] === 2 ? 'Silver Contender' : ($tm['rank'] === 3 ? 'Bronze Contender' : 'Finalist'));
+                                ?>
+                                    <div class="col-md-6 col-lg-3">
+                                        <div class="dashboard-glass-card p-3 text-center h-100 position-relative" style="border: 1px solid <?= $tm['color_code'] ?>88 !important;">
+                                            <span class="badge px-2 py-1 mb-2 fw-bold" style="background-color: <?= $tm['color_code'] ?>; color: #fff;">
+                                                Seed #<?= $tm['seed'] ?> &bull; <?= htmlspecialchars($tm['short_code']) ?>
+                                            </span>
+                                            <h5 class="fw-bold text-white mb-1 text-truncate"><?= htmlspecialchars($tm['name']) ?></h5>
+                                            <div class="text-white-50 small mb-2"><?= htmlspecialchars($tm['full_name']) ?></div>
+                                            <div class="d-flex justify-content-center align-items-center gap-2 pt-2 border-top border-white border-opacity-10">
+                                                <i class="fas <?= $medIcon ?>"></i>
+                                                <span class="small fw-bold text-white"><?= $medLabel ?></span>
+                                                <span class="badge bg-dark font-monospace text-info"><?= number_format($tm['total_vp'], 2) ?> VPs</span>
                                             </div>
-                                        <?php endforeach; ?>
+                                        </div>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
+
+                            <!-- Super League Master Scoreboard Matrix -->
+                            <div class="bridge-matrix-card p-4 mb-4">
+                                <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-3">
+                                    <div>
+                                        <div class="d-flex align-items-center gap-2 mb-1">
+                                            <span class="badge bg-warning text-dark text-uppercase px-2 py-1 fw-bold">Super League Finals</span>
+                                            <span class="badge bg-danger text-white px-2 py-1 fw-bold"><i class="fas fa-calendar-day me-1"></i> Saturday, 10th October 2026</span>
+                                        </div>
+                                        <h3 class="fw-bold text-white mb-0">
+                                            <i class="fas fa-crown text-warning me-2"></i> HPCL BRIDGE SUPER LEAGUE FINALS SCOREBOARD
+                                        </h3>
+                                        <div class="text-white-50 small mt-1">Top 4 Qualified Teams &bull; 3 Rounds Round-Robin &bull; WBF Continuous 20-VP Scale</div>
+                                    </div>
+                                    <div class="d-flex flex-wrap gap-2">
+                                        <span class="bridge-legend-badge">
+                                            <span class="text-info fw-bold me-1">Top-Left:</span> Cumulative VPs
+                                        </span>
+                                        <span class="bridge-legend-badge">
+                                            <span class="text-success fw-bold me-1">Bottom-Left:</span> Round VPs
+                                        </span>
+                                        <span class="bridge-legend-badge">
+                                            <span class="text-warning fw-bold me-1">Bottom-Right:</span> Opponent Seed
+                                        </span>
+                                        <span class="bridge-legend-badge">
+                                            <span class="text-white-50 fw-bold me-1">Match VP Sum:</span> 20.00
+                                        </span>
                                     </div>
                                 </div>
-                            <?php endfor; ?>
+
+                                <div class="bridge-table-wrapper">
+                                    <table class="bridge-matrix-tbl">
+                                        <thead>
+                                            <tr>
+                                                <th style="width: 75px;">Seed #</th>
+                                                <th style="text-align: left; min-width: 170px;">Finalist Team</th>
+                                                <th style="width: 130px;">SL-I<br><small style="font-size:0.68rem; font-weight:normal;">10 Oct 10:00</small></th>
+                                                <th style="width: 130px;">SL-II<br><small style="font-size:0.68rem; font-weight:normal;">10 Oct 12:30</small></th>
+                                                <th style="width: 130px;">SL-III<br><small style="font-size:0.68rem; font-weight:normal;">10 Oct 15:30</small></th>
+                                                <th style="width: 110px;">TOTAL VPs</th>
+                                                <th style="width: 120px;">PODIUM</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <?php foreach ($slMatrixRows as $row): 
+                                                $isLeader = ($row['rank'] === 1);
+                                            ?>
+                                                <tr class="<?= $isLeader ? 'leader-row' : '' ?>">
+                                                    <td class="text-center font-monospace fw-bold text-warning fs-5">
+                                                        <?= $row['seed'] ?>
+                                                    </td>
+                                                    <td>
+                                                        <div class="d-flex align-items-center">
+                                                            <span class="badge me-2 px-2 py-1" style="background-color: <?= $row['color_code'] ?>; color: #fff; font-size: 0.78rem; font-weight: 700;">
+                                                                <?= htmlspecialchars($row['short_code']) ?>
+                                                            </span>
+                                                            <div>
+                                                                <div class="fw-bold text-white"><?= htmlspecialchars($row['name']) ?></div>
+                                                                <div class="text-white-50 small" style="font-size: 0.75rem;"><?= htmlspecialchars($row['full_name']) ?></div>
+                                                            </div>
+                                                        </div>
+                                                    </td>
+
+                                                    <?php for ($r = 1; $r <= 3; $r++): 
+                                                        $rnd = $row['rounds'][$r];
+                                                        $hasScore = ($rnd['cum_vp'] !== null);
+                                                    ?>
+                                                        <td class="text-center">
+                                                            <?php if ($hasScore): ?>
+                                                                <div class="bridge-cell-split" title="Super League R<?= $r ?>: <?= $rnd['round_vp'] !== null ? '+' . number_format($rnd['round_vp'], 2) . ' VP' : '' ?> vs Seed #<?= $rnd['opp_seed'] ?> (<?= htmlspecialchars($rnd['opp_code']) ?>)">
+                                                                    <div class="bridge-cell-cum-vp"><?= number_format($rnd['cum_vp'], 2) ?></div>
+                                                                    <?php if ($rnd['round_vp'] !== null): ?>
+                                                                        <div class="bridge-cell-round-vp">+<?= number_format($rnd['round_vp'], 2) ?></div>
+                                                                    <?php endif; ?>
+                                                                    <div class="bridge-cell-opp-no">#<?= $rnd['opp_seed'] ?> <?= htmlspecialchars($rnd['opp_code']) ?></div>
+                                                                </div>
+                                                            <?php elseif ($rnd['opp_seed']): ?>
+                                                                <div class="bridge-cell-split" title="Scheduled: vs Seed #<?= $rnd['opp_seed'] ?> (<?= htmlspecialchars($rnd['opp_code']) ?>)">
+                                                                    <div class="bridge-cell-cum-vp" style="color: #64748b;">-</div>
+                                                                    <div class="bridge-cell-opp-no">#<?= $rnd['opp_seed'] ?> <?= htmlspecialchars($rnd['opp_code']) ?></div>
+                                                                </div>
+                                                            <?php else: ?>
+                                                                <div class="bridge-cell-empty" title="SL-<?= $r ?> pending"></div>
+                                                            <?php endif; ?>
+                                                        </td>
+                                                    <?php endfor; ?>
+
+                                                    <td class="text-center">
+                                                        <span class="fs-5 fw-bold font-monospace text-info">
+                                                            <?= number_format($row['total_vp'], 2) ?>
+                                                        </span>
+                                                    </td>
+                                                    <td class="text-center">
+                                                        <?php if ($row['rank'] === 1): ?>
+                                                            <span class="badge bg-warning text-dark px-2 py-1 fs-6 fw-bold"><i class="fas fa-crown me-1"></i>Gold</span>
+                                                        <?php elseif ($row['rank'] === 2): ?>
+                                                            <span class="badge bg-secondary text-white px-2 py-1 fs-6 fw-bold"><i class="fas fa-medal me-1"></i>Silver</span>
+                                                        <?php elseif ($row['rank'] === 3): ?>
+                                                            <span class="badge bg-danger text-white px-2 py-1 fs-6 fw-bold"><i class="fas fa-award me-1"></i>Bronze</span>
+                                                        <?php else: ?>
+                                                            <span class="text-white-50 fw-bold fs-6">4th Place</span>
+                                                        <?php endif; ?>
+                                                    </td>
+                                                </tr>
+                                            <?php endforeach; ?>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <!-- Super League Round-by-Round Encounters Tabs -->
+                            <div class="dashboard-glass-card p-4 mb-4">
+                                <div class="d-flex flex-wrap justify-content-between align-items-center mb-3">
+                                    <h4 class="fw-bold text-white mb-0">
+                                        <i class="fas fa-stream text-primary me-2"></i> Super League Encounters (10th October 2026)
+                                    </h4>
+                                    <span class="badge bg-primary">2 Tables per Round &bull; 6 Championship Matches</span>
+                                </div>
+
+                                <ul class="nav nav-pills mb-3 gap-2" id="bridgeSlRoundPills" role="tablist">
+                                    <?php 
+                                    $slRoman = [
+                                        1 => 'SL-I (10:00 AM)', 
+                                        2 => 'SL-II (12:30 PM)', 
+                                        3 => 'SL-III (03:30 PM)'
+                                    ];
+                                    for ($r = 1; $r <= 3; $r++): 
+                                        $isCompleted = false;
+                                        foreach ($slFixturesByRound[$r] ?? [] as $fix) {
+                                            if ($fix['status'] === 'completed') $isCompleted = true;
+                                        }
+                                    ?>
+                                        <li class="nav-item" role="presentation">
+                                            <button class="nav-link <?= $r === 1 ? 'active' : '' ?> fw-bold px-3 py-2" id="pill-sl-round-<?= $r ?>-tab" data-bs-toggle="pill" data-bs-target="#pill-sl-round-<?= $r ?>" type="button">
+                                                <?= $slRoman[$r] ?>
+                                                <?php if ($isCompleted): ?>
+                                                    <span class="badge bg-success ms-1"><i class="fas fa-check"></i></span>
+                                                <?php else: ?>
+                                                    <span class="badge bg-secondary ms-1">2 Tables</span>
+                                                <?php endif; ?>
+                                            </button>
+                                        </li>
+                                    <?php endfor; ?>
+                                </ul>
+
+                                <div class="tab-content" id="bridgeSlRoundPillsContent">
+                                    <?php for ($r = 1; $r <= 3; $r++): ?>
+                                        <div class="tab-pane fade <?= $r === 1 ? 'show active' : '' ?>" id="pill-sl-round-<?= $r ?>">
+                                            <div class="row g-3">
+                                                <?php foreach ($slFixturesByRound[$r] ?? [] as $f): 
+                                                    $isDone = ($f['status'] === 'completed');
+                                                ?>
+                                                    <div class="col-md-6">
+                                                        <div class="p-3 rounded border" style="background: rgba(15, 23, 42, 0.6); border-color: rgba(255,255,255,0.14) !important;">
+                                                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                                                <span class="badge bg-primary fw-bold">Table <?= $f['table_no'] ?></span>
+                                                                <span class="small text-white-50"><i class="far fa-clock me-1"></i> <?= $f['start_time'] ?> - <?= $f['end_time'] ?> &bull; 10 Oct 2026</span>
+                                                                <div>
+                                                                    <?php if ($isDone): ?>
+                                                                        <span class="badge bg-success"><i class="fas fa-check me-1"></i> Concluded</span>
+                                                                    <?php elseif ($f['status'] === 'in_progress'): ?>
+                                                                        <span class="badge bg-danger pulse-animation">Live Scoring</span>
+                                                                    <?php else: ?>
+                                                                        <span class="badge bg-secondary">Scheduled</span>
+                                                                    <?php endif; ?>
+                                                                </div>
+                                                            </div>
+
+                                                            <div class="d-flex justify-content-between align-items-center text-center my-3">
+                                                                <div style="width: 44%;">
+                                                                    <span class="badge mb-1 px-2 py-1" style="background-color: <?= $f['team1_color'] ?>;">
+                                                                        Seed #<?= $f['team1_seed'] ?: '?' ?> &bull; <?= htmlspecialchars($f['team1_code']) ?>
+                                                                    </span>
+                                                                    <div class="fw-bold text-white fs-6 text-truncate"><?= htmlspecialchars($f['team1_name']) ?></div>
+                                                                    <?php if ($isDone): ?>
+                                                                        <div class="fs-4 fw-bold text-info font-monospace mt-1"><?= number_format($f['vps_a'] ?? 0, 2) ?> VP</div>
+                                                                    <?php else: ?>
+                                                                        <div class="text-white-50 small mt-1">Awaiting Match</div>
+                                                                    <?php endif; ?>
+                                                                </div>
+                                                                
+                                                                <div class="text-warning fw-bold fs-5">VS</div>
+
+                                                                <div style="width: 44%;">
+                                                                    <span class="badge mb-1 px-2 py-1" style="background-color: <?= $f['team2_color'] ?>;">
+                                                                        Seed #<?= $f['team2_seed'] ?: '?' ?> &bull; <?= htmlspecialchars($f['team2_code']) ?>
+                                                                    </span>
+                                                                    <div class="fw-bold text-white fs-6 text-truncate"><?= htmlspecialchars($f['team2_name']) ?></div>
+                                                                    <?php if ($isDone): ?>
+                                                                        <div class="fs-4 fw-bold text-info font-monospace mt-1"><?= number_format($f['vps_b'] ?? 0, 2) ?> VP</div>
+                                                                    <?php else: ?>
+                                                                        <div class="text-white-50 small mt-1">Awaiting Match</div>
+                                                                    <?php endif; ?>
+                                                                </div>
+                                                            </div>
+
+                                                            <?php if ($isDone && $f['winner_id']): ?>
+                                                                <div class="text-center mt-2 pt-2 border-top border-secondary border-opacity-25 small text-warning fw-semibold">
+                                                                    <i class="fas fa-trophy me-1"></i> Winner: <?= $f['winner_id'] == $f['team1_id'] ? $f['team1_name'] : $f['team2_name'] ?>
+                                                                </div>
+                                                            <?php elseif ($isDone && !$f['winner_id']): ?>
+                                                                <div class="text-center mt-2 pt-2 border-top border-secondary border-opacity-25 small text-info fw-semibold">
+                                                                    <i class="fas fa-handshake me-1"></i> Match Tied (10.00 - 10.00 VPs)
+                                                                </div>
+                                                            <?php endif; ?>
+                                                        </div>
+                                                    </div>
+                                                <?php endforeach; ?>
+                                            </div>
+                                        </div>
+                                    <?php endfor; ?>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- ============================================== -->
+                        <!-- STAGE 2: SWISS LEAGUE PRELIMS (CONCLUDED)       -->
+                        <!-- ============================================== -->
+                        <div class="tab-pane fade" id="pill-swiss-league" role="tabpanel">
+                            <!-- Top Podium Highlights (Swiss) -->
+                            <div class="row g-3 mb-4">
+                                <div class="col-md-4">
+                                    <div class="dashboard-glass-card p-3 border-warning border-opacity-50 text-center">
+                                        <span class="badge bg-warning text-dark px-3 py-1 mb-2 fw-bold"><i class="fas fa-crown me-1"></i> Prelims Rank 1 (Qualified)</span>
+                                        <h4 class="fw-bold text-white mb-0"><?= htmlspecialchars($leader1['name'] ?? 'TBD') ?></h4>
+                                        <span class="fs-4 fw-bold text-warning"><?= number_format($leader1['total_vp'] ?? 0, 2) ?> <small class="fs-6 text-white-50">VPs</small></span>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="dashboard-glass-card p-3 border-secondary border-opacity-50 text-center">
+                                        <span class="badge bg-secondary text-white px-3 py-1 mb-2 fw-bold"><i class="fas fa-medal me-1"></i> Prelims Rank 2 (Qualified)</span>
+                                        <h4 class="fw-bold text-white mb-0"><?= htmlspecialchars($leader2['name'] ?? 'TBD') ?></h4>
+                                        <span class="fs-4 fw-bold text-info"><?= number_format($leader2['total_vp'] ?? 0, 2) ?> <small class="fs-6 text-white-50">VPs</small></span>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="dashboard-glass-card p-3 border-danger border-opacity-50 text-center">
+                                        <span class="badge bg-danger text-white px-3 py-1 mb-2 fw-bold"><i class="fas fa-award me-1"></i> Prelims Rank 3 (Qualified)</span>
+                                        <h4 class="fw-bold text-white mb-0"><?= htmlspecialchars($leader3['name'] ?? 'TBD') ?></h4>
+                                        <span class="fs-4 fw-bold text-light"><?= number_format($leader3['total_vp'] ?? 0, 2) ?> <small class="fs-6 text-white-50">VPs</small></span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Master Consolidated Scoreboard Card (Swiss Whiteboard) -->
+                            <div class="bridge-matrix-card p-4 mb-4">
+                                <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-3">
+                                    <div>
+                                        <span class="badge bg-success text-white text-uppercase px-3 py-1 fw-bold mb-1">Official Concluded Matrix</span>
+                                        <h3 class="fw-bold text-white mb-0">
+                                            <i class="fas fa-clone text-info me-2"></i> HPCL ALL INDIA INTER UNIT SPORTS & GAMES TOURNAMENT 2026
+                                        </h3>
+                                        <div class="text-white-50 small mt-1">SWISS PRELIMS CONSOLIDATED SCOREBOARD &bull; 10 Teams &bull; Continuous 20-VP Scale</div>
+                                    </div>
+                                    <div class="d-flex flex-wrap gap-2">
+                                        <span class="bridge-legend-badge">
+                                            <span class="text-info fw-bold me-1">Top-Left:</span> Cumulative VPs
+                                        </span>
+                                        <span class="bridge-legend-badge">
+                                            <span class="text-success fw-bold me-1">Bottom-Left:</span> Round VPs
+                                        </span>
+                                        <span class="bridge-legend-badge">
+                                            <span class="text-warning fw-bold me-1">Bottom-Right:</span> Opponent #
+                                        </span>
+                                        <span class="bridge-legend-badge">
+                                            <span class="text-white-50 fw-bold me-1">Match VP Scale:</span> 20.00
+                                        </span>
+                                    </div>
+                                </div>
+
+                                <div class="bridge-table-wrapper">
+                                    <table class="bridge-matrix-tbl">
+                                        <thead>
+                                            <tr>
+                                                <th style="width: 75px;">Team No.</th>
+                                                <th style="text-align: left; min-width: 170px;">Team Name</th>
+                                                <th style="width: 110px;">R-I</th>
+                                                <th style="width: 110px;">R-II</th>
+                                                <th style="width: 110px;">R-III</th>
+                                                <th style="width: 110px;">R-IV</th>
+                                                <th style="width: 110px;">R-V</th>
+                                                <th style="width: 110px;">TOTAL</th>
+                                                <th style="width: 80px;">RANK</th>
+                                                <th style="width: 120px;">STATUS</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <?php foreach ($matrixRows as $row): 
+                                                $isFirst = ($row['rank'] === 1);
+                                                $isQualified = ($row['rank'] <= 4);
+                                            ?>
+                                                <tr class="<?= $isFirst ? 'leader-row' : '' ?>">
+                                                    <td class="text-center font-monospace fw-bold text-warning fs-5">
+                                                        <?= $row['team_no'] ?>
+                                                    </td>
+                                                    <td>
+                                                        <div class="d-flex align-items-center">
+                                                            <span class="badge me-2 px-2 py-1" style="background-color: <?= $row['color_code'] ?>; color: #fff; font-size: 0.78rem; font-weight: 700;">
+                                                                <?= htmlspecialchars($row['short_code']) ?>
+                                                            </span>
+                                                            <div>
+                                                                <div class="fw-bold text-white"><?= htmlspecialchars($row['name']) ?></div>
+                                                                <div class="text-white-50 small" style="font-size: 0.75rem;"><?= htmlspecialchars($row['full_name']) ?></div>
+                                                            </div>
+                                                        </div>
+                                                    </td>
+
+                                                    <?php for ($r = 1; $r <= 5; $r++): 
+                                                        $rnd = $row['rounds'][$r];
+                                                        $hasScore = ($rnd['cum_vp'] !== null);
+                                                    ?>
+                                                        <td class="text-center">
+                                                            <?php if ($hasScore): ?>
+                                                                <div class="bridge-cell-split" title="Round <?= $r ?>: <?= $rnd['round_vp'] !== null ? '+' . number_format($rnd['round_vp'], 2) . ' VP' : '' ?> vs Team #<?= $rnd['opp_no'] ?> (Cumulative: <?= number_format($rnd['cum_vp'], 2) ?> VP)">
+                                                                    <div class="bridge-cell-cum-vp"><?= number_format($rnd['cum_vp'], 2) ?></div>
+                                                                    <?php if ($rnd['round_vp'] !== null): ?>
+                                                                        <div class="bridge-cell-round-vp" title="Round VP: +<?= number_format($rnd['round_vp'], 2) ?>">+<?= number_format($rnd['round_vp'], 2) ?></div>
+                                                                    <?php endif; ?>
+                                                                    <div class="bridge-cell-opp-no" title="Opponent: Team #<?= $rnd['opp_no'] ?>"><?= $rnd['opp_no'] ?></div>
+                                                                </div>
+                                                            <?php elseif ($rnd['opp_no']): ?>
+                                                                <div class="bridge-cell-split" title="Scheduled: vs Team #<?= $rnd['opp_no'] ?>">
+                                                                    <div class="bridge-cell-cum-vp" style="color: #64748b;">-</div>
+                                                                    <div class="bridge-cell-opp-no"><?= $rnd['opp_no'] ?></div>
+                                                                </div>
+                                                            <?php else: ?>
+                                                                <div class="bridge-cell-empty" title="Round <?= $r ?> pending"></div>
+                                                            <?php endif; ?>
+                                                        </td>
+                                                    <?php endfor; ?>
+
+                                                    <td class="text-center">
+                                                        <span class="fs-5 fw-bold font-monospace text-info">
+                                                            <?= number_format($row['total_vp'], 2) ?>
+                                                        </span>
+                                                    </td>
+                                                    <td class="text-center">
+                                                        <?php if ($row['rank'] === 1): ?>
+                                                            <span class="badge bg-warning text-dark px-2 py-1 fs-6 fw-bold"><i class="fas fa-crown"></i> 1</span>
+                                                        <?php elseif ($row['rank'] === 2): ?>
+                                                            <span class="badge bg-secondary text-white px-2 py-1 fs-6 fw-bold"><i class="fas fa-medal"></i> 2</span>
+                                                        <?php elseif ($row['rank'] === 3): ?>
+                                                            <span class="badge bg-danger text-white px-2 py-1 fs-6 fw-bold"><i class="fas fa-award"></i> 3</span>
+                                                        <?php else: ?>
+                                                            <span class="text-white-50 fw-bold fs-6"><?= $row['rank'] ?></span>
+                                                        <?php endif; ?>
+                                                    </td>
+                                                    <td class="text-center">
+                                                        <?php if ($isQualified): ?>
+                                                            <span class="badge bg-success bg-opacity-25 text-success border border-success border-opacity-50 px-2 py-1 fw-bold" style="font-size: 0.82rem; letter-spacing: 0.5px;">
+                                                                <i class="fas fa-check-circle me-1"></i>Qualified
+                                                            </span>
+                                                        <?php else: ?>
+                                                            <span class="text-white-50 small font-monospace">-</span>
+                                                        <?php endif; ?>
+                                                    </td>
+                                                </tr>
+                                            <?php endforeach; ?>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <!-- Swiss Round-Wise Encounters Tabs -->
+                            <div class="dashboard-glass-card p-4 mb-4">
+                                <h4 class="fw-bold text-white mb-3">
+                                    <i class="fas fa-stream text-primary me-2"></i> Swiss Round Table Encounters
+                                </h4>
+                                
+                                <ul class="nav nav-pills mb-3 gap-2" id="bridgeRoundPills" role="tablist">
+                                    <?php 
+                                    $rRoman = [1 => 'R-I', 2 => 'R-II', 3 => 'R-III', 4 => 'R-IV', 5 => 'R-V'];
+                                    for ($r = 1; $r <= 5; $r++): 
+                                        $isCompleted = false;
+                                        foreach ($fixturesByRound[$r] ?? [] as $fix) {
+                                            if ($fix['status'] === 'completed') $isCompleted = true;
+                                        }
+                                    ?>
+                                        <li class="nav-item" role="presentation">
+                                            <button class="nav-link <?= $r === 1 ? 'active' : '' ?> fw-bold px-3 py-2" id="pill-round-<?= $r ?>-tab" data-bs-toggle="pill" data-bs-target="#pill-round-<?= $r ?>" type="button">
+                                                <?= $rRoman[$r] ?> 
+                                                <?php if ($isCompleted): ?>
+                                                    <span class="badge bg-success ms-1"><i class="fas fa-check"></i></span>
+                                                <?php else: ?>
+                                                    <span class="badge bg-secondary ms-1">5 Tables</span>
+                                                <?php endif; ?>
+                                            </button>
+                                        </li>
+                                    <?php endfor; ?>
+                                </ul>
+
+                                <div class="tab-content" id="bridgeRoundPillsContent">
+                                    <?php for ($r = 1; $r <= 5; $r++): ?>
+                                        <div class="tab-pane fade <?= $r === 1 ? 'show active' : '' ?>" id="pill-round-<?= $r ?>">
+                                            <div class="row g-3">
+                                                <?php foreach ($fixturesByRound[$r] ?? [] as $f): 
+                                                    $isDone = ($f['status'] === 'completed');
+                                                ?>
+                                                    <div class="col-md-6 col-lg-4">
+                                                        <div class="p-3 rounded border" style="background: rgba(15, 23, 42, 0.6); border-color: rgba(255,255,255,0.1) !important;">
+                                                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                                                <span class="badge bg-primary">Table <?= $f['table_no'] ?></span>
+                                                                <?php if ($isDone): ?>
+                                                                    <span class="badge bg-success"><i class="fas fa-check me-1"></i> Concluded</span>
+                                                                <?php elseif ($f['status'] === 'in_progress'): ?>
+                                                                    <span class="badge bg-danger pulse-animation">Live Scoring</span>
+                                                                <?php else: ?>
+                                                                    <span class="badge bg-secondary">Scheduled</span>
+                                                                <?php endif; ?>
+                                                            </div>
+
+                                                            <div class="d-flex justify-content-between align-items-center text-center my-2">
+                                                                <div style="width: 44%;">
+                                                                    <span class="badge mb-1 px-2 py-1" style="background-color: <?= $f['team1_color'] ?>;">
+                                                                        #<?= $f['team1_num'] ?: '?' ?> <?= htmlspecialchars($f['team1_code']) ?>
+                                                                    </span>
+                                                                    <div class="fw-bold text-white small text-truncate"><?= htmlspecialchars($f['team1_name']) ?></div>
+                                                                    <?php if ($isDone): ?>
+                                                                        <div class="fs-5 fw-bold text-info font-monospace mt-1"><?= number_format($f['vps_a'] ?? 0, 2) ?> VP</div>
+                                                                    <?php endif; ?>
+                                                                </div>
+                                                                
+                                                                <div class="text-white-50 fw-bold small">VS</div>
+
+                                                                <div style="width: 44%;">
+                                                                    <span class="badge mb-1 px-2 py-1" style="background-color: <?= $f['team2_color'] ?>;">
+                                                                        #<?= $f['team2_num'] ?: '?' ?> <?= htmlspecialchars($f['team2_code']) ?>
+                                                                    </span>
+                                                                    <div class="fw-bold text-white small text-truncate"><?= htmlspecialchars($f['team2_name']) ?></div>
+                                                                    <?php if ($isDone): ?>
+                                                                        <div class="fs-5 fw-bold text-info font-monospace mt-1"><?= number_format($f['vps_b'] ?? 0, 2) ?> VP</div>
+                                                                    <?php endif; ?>
+                                                                </div>
+                                                            </div>
+
+                                                            <?php if ($isDone && $f['winner_id']): ?>
+                                                                <div class="text-center mt-2 pt-2 border-top border-secondary border-opacity-25 small text-warning fw-semibold">
+                                                                    <i class="fas fa-trophy me-1"></i> Winner: <?= $f['winner_id'] == $f['team1_id'] ? $f['team1_name'] : $f['team2_name'] ?>
+                                                                </div>
+                                                            <?php elseif ($isDone && !$f['winner_id']): ?>
+                                                                <div class="text-center mt-2 pt-2 border-top border-secondary border-opacity-25 small text-info fw-semibold">
+                                                                    <i class="fas fa-handshake me-1"></i> Match Tied (10.00 - 10.00 VPs)
+                                                                </div>
+                                                            <?php endif; ?>
+                                                        </div>
+                                                    </div>
+                                                <?php endforeach; ?>
+                                            </div>
+                                        </div>
+                                    <?php endfor; ?>
+                                </div>
+                            </div>
                         </div>
                     </div>
+                </div>
 
                     <!-- Registered Teams Roster -->
                     <div class="dashboard-glass-card p-4">

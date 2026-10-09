@@ -892,6 +892,9 @@ function get_bridge_swiss_matrix($pdo, $gameId) {
 
     foreach ($matches as $m) {
         $scores = json_decode($m['scores_json'] ?? '{}', true) ?: [];
+        if (!empty($scores['stage']) && $scores['stage'] === 'super_league') continue;
+        if (stripos($m['round'], 'Super League') !== false) continue;
+
         $rNo = (int)($scores['round_no'] ?? 0);
         if ($rNo < 1 || $rNo > 5) {
             if (preg_match('/(?:Round|R)[ -]*([1-5]|I{1,3}|IV|V)/i', $m['round'], $matchesRound)) {
@@ -995,5 +998,191 @@ function get_bridge_swiss_matrix($pdo, $gameId) {
         'matrix' => $matrix,
         'fixtures' => $roundFixtures,
         'canonical_teams' => $canonical
+    ];
+}
+
+/**
+ * Compute Bridge Super League Finals Matrix (Top 4 Qualifiers, R-1 to R-3, Cumulative VPs, Medals)
+ * Date: 10th October 2026
+ */
+function get_bridge_super_league_data($pdo, $gameId) {
+    // 1. Identify Top 4 teams from Swiss Prelims
+    $swissData = get_bridge_swiss_matrix($pdo, $gameId);
+    $qualified = [];
+    foreach ($swissData['matrix'] as $row) {
+        if ($row['rank'] <= 4) {
+            $qualified[$row['rank']] = $row;
+        }
+    }
+    ksort($qualified);
+
+    // Fallback if Swiss not complete
+    if (count($qualified) < 4) {
+        $canonicalMap = [
+            1 => ['code' => 'MR', 'name' => 'MR'],
+            2 => ['code' => 'VR', 'name' => 'VR'],
+            3 => ['code' => 'SCZ', 'name' => 'SCZ'],
+            4 => ['code' => 'MF', 'name' => 'MARATHON']
+        ];
+        foreach ($canonicalMap as $seed => $c) {
+            if (!isset($qualified[$seed])) {
+                foreach ($swissData['matrix'] as $row) {
+                    if (strcasecmp($row['short_code'], $c['code']) === 0) {
+                        $row['rank'] = $seed;
+                        $qualified[$seed] = $row;
+                        break;
+                    }
+                }
+            }
+        }
+        ksort($qualified);
+    }
+
+    $seedMapByTeamId = [];
+    $slMatrix = [];
+    $roundFixtures = [1 => [], 2 => [], 3 => []];
+
+    foreach ($qualified as $seed => $t) {
+        if (!empty($t['team_id'])) {
+            $seedMapByTeamId[$t['team_id']] = $seed;
+        }
+        $slMatrix[$seed] = [
+            'seed' => $seed,
+            'team_id' => $t['team_id'] ?? null,
+            'name' => $t['name'],
+            'full_name' => $t['full_name'],
+            'short_code' => $t['short_code'],
+            'color_code' => $t['color_code'],
+            'rounds' => [
+                1 => ['opp_seed' => null, 'opp_code' => '', 'opp_name' => '', 'round_vp' => null, 'cum_vp' => null, 'status' => 'scheduled', 'match_id' => null, 'table_no' => null],
+                2 => ['opp_seed' => null, 'opp_code' => '', 'opp_name' => '', 'round_vp' => null, 'cum_vp' => null, 'status' => 'scheduled', 'match_id' => null, 'table_no' => null],
+                3 => ['opp_seed' => null, 'opp_code' => '', 'opp_name' => '', 'round_vp' => null, 'cum_vp' => null, 'status' => 'scheduled', 'match_id' => null, 'table_no' => null],
+            ],
+            'total_vp' => 0.0,
+            'rank' => $seed,
+            'medal' => ($seed === 1 ? 'gold' : ($seed === 2 ? 'silver' : ($seed === 3 ? 'bronze' : 'none')))
+        ];
+    }
+
+    // Fetch Super League matches
+    $stmt = $pdo->prepare("
+        SELECT * FROM matches 
+        WHERE game_id = ? AND (round LIKE 'Super League%' OR scores_json LIKE '%super_league%')
+        ORDER BY id ASC
+    ");
+    $stmt->execute([$gameId]);
+    $matches = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    foreach ($matches as $m) {
+        $scores = json_decode($m['scores_json'] ?? '{}', true) ?: [];
+        $rNo = (int)($scores['round_no'] ?? 0);
+        if ($rNo < 1 || $rNo > 3) {
+            if (preg_match('/(?:SL|Super League)[ -]*(?:R-?|Round )?([1-3]|I{1,3})/i', $m['round'], $rMatch)) {
+                $rStr = strtoupper($rMatch[1]);
+                $mapRoman = ['1' => 1, '2' => 2, '3' => 3, 'I' => 1, 'II' => 2, 'III' => 3];
+                $rNo = $mapRoman[$rStr] ?? 0;
+            }
+        }
+        if ($rNo < 1 || $rNo > 3) continue;
+
+        $t1Id = $m['team1_id'];
+        $t2Id = $m['team2_id'];
+        $s1 = $seedMapByTeamId[$t1Id] ?? null;
+        $s2 = $seedMapByTeamId[$t2Id] ?? null;
+
+        $tableNo = (int)($scores['table_no'] ?? 0);
+        if (!$tableNo && preg_match('/Table\s*([1-2])/i', $m['pool_name'] ?? '', $tblMatch)) {
+            $tableNo = (int)$tblMatch[1];
+        }
+
+        $vpA = isset($scores['vps_a']) && $scores['vps_a'] !== null ? (float)$scores['vps_a'] : null;
+        $vpB = isset($scores['vps_b']) && $scores['vps_b'] !== null ? (float)$scores['vps_b'] : null;
+        $status = $m['status'];
+
+        if ($s1 && $s2 && isset($slMatrix[$s1]) && isset($slMatrix[$s2])) {
+            $slMatrix[$s1]['rounds'][$rNo]['opp_seed'] = $s2;
+            $slMatrix[$s2]['rounds'][$rNo]['opp_seed'] = $s1;
+            $slMatrix[$s1]['rounds'][$rNo]['opp_code'] = $slMatrix[$s2]['short_code'];
+            $slMatrix[$s2]['rounds'][$rNo]['opp_code'] = $slMatrix[$s1]['short_code'];
+            $slMatrix[$s1]['rounds'][$rNo]['opp_name'] = $slMatrix[$s2]['name'];
+            $slMatrix[$s2]['rounds'][$rNo]['opp_name'] = $slMatrix[$s1]['name'];
+            $slMatrix[$s1]['rounds'][$rNo]['status'] = $status;
+            $slMatrix[$s2]['rounds'][$rNo]['status'] = $status;
+            $slMatrix[$s1]['rounds'][$rNo]['match_id'] = $m['id'];
+            $slMatrix[$s2]['rounds'][$rNo]['match_id'] = $m['id'];
+            $slMatrix[$s1]['rounds'][$rNo]['table_no'] = $tableNo;
+            $slMatrix[$s2]['rounds'][$rNo]['table_no'] = $tableNo;
+
+            if (($status === 'completed' || $status === 'in_progress') && ($vpA !== null || $vpB !== null)) {
+                $slMatrix[$s1]['rounds'][$rNo]['round_vp'] = $vpA;
+                $slMatrix[$s2]['rounds'][$rNo]['round_vp'] = $vpB;
+            }
+        }
+
+        $roundFixtures[$rNo][] = [
+            'match_id' => $m['id'],
+            'table_no' => $tableNo ?: (count($roundFixtures[$rNo]) + 1),
+            'team1_id' => $t1Id,
+            'team2_id' => $t2Id,
+            'team1_seed' => $s1,
+            'team2_seed' => $s2,
+            'team1_name' => $s1 && isset($slMatrix[$s1]) ? $slMatrix[$s1]['name'] : 'TBD',
+            'team2_name' => $s2 && isset($slMatrix[$s2]) ? $slMatrix[$s2]['name'] : 'TBD',
+            'team1_code' => $s1 && isset($slMatrix[$s1]) ? $slMatrix[$s1]['short_code'] : '',
+            'team2_code' => $s2 && isset($slMatrix[$s2]) ? $slMatrix[$s2]['short_code'] : '',
+            'team1_color' => $s1 && isset($slMatrix[$s1]) ? $slMatrix[$s1]['color_code'] : '#94a3b8',
+            'team2_color' => $s2 && isset($slMatrix[$s2]) ? $slMatrix[$s2]['color_code'] : '#94a3b8',
+            'vps_a' => $vpA,
+            'vps_b' => $vpB,
+            'imps_a' => $scores['imps_a'] ?? 0,
+            'imps_b' => $scores['imps_b'] ?? 0,
+            'status' => $status,
+            'winner_id' => $m['winner_id'],
+            'match_date' => $m['match_date'],
+            'start_time' => $m['start_time'],
+            'end_time' => $m['end_time']
+        ];
+    }
+
+    // Sort round fixtures by table_no
+    for ($r = 1; $r <= 3; $r++) {
+        usort($roundFixtures[$r], function($a, $b) {
+            return ($a['table_no'] ?? 0) <=> ($b['table_no'] ?? 0);
+        });
+    }
+
+    // Compute cumulative VPs across Super League rounds
+    foreach ($slMatrix as $seed => &$row) {
+        $cum = 0.0;
+        for ($r = 1; $r <= 3; $r++) {
+            if ($row['rounds'][$r]['round_vp'] !== null) {
+                $cum += $row['rounds'][$r]['round_vp'];
+                $row['rounds'][$r]['cum_vp'] = round($cum, 2);
+            }
+        }
+        $row['total_vp'] = round($cum, 2);
+    }
+    unset($row);
+
+    // Calculate Super League Ranks
+    $sorted = $slMatrix;
+    uasort($sorted, function($a, $b) {
+        if ($b['total_vp'] != $a['total_vp']) {
+            return ($b['total_vp'] > $a['total_vp']) ? 1 : -1;
+        }
+        return $a['seed'] <=> $b['seed'];
+    });
+
+    $rank = 1;
+    foreach ($sorted as $seed => $data) {
+        $slMatrix[$seed]['rank'] = $rank;
+        $slMatrix[$seed]['medal'] = ($rank === 1 ? 'gold' : ($rank === 2 ? 'silver' : ($rank === 3 ? 'bronze' : 'none')));
+        $rank++;
+    }
+
+    return [
+        'matrix' => $slMatrix,
+        'fixtures' => $roundFixtures,
+        'qualified_teams' => array_values($qualified)
     ];
 }

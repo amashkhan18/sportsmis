@@ -98,7 +98,7 @@ $stmt = $pdo->query("
     LEFT JOIN teams tw ON m.winner_id = tw.id
     LEFT JOIN facilities f ON m.facility_id = f.id
     WHERE $whereClause
-    ORDER BY FIELD(m.status, 'in_progress', 'scheduled', 'completed'), m.match_date ASC, m.start_time ASC
+    ORDER BY FIELD(m.status, 'in_progress', 'completed', 'scheduled'), m.match_date ASC, m.start_time ASC
 ");
 
 $matches = $stmt->fetchAll(PDO::FETCH_ASSOC);

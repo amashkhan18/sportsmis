@@ -138,12 +138,21 @@ function get_overall_championship_leaderboard($pdo, $forceMode = null) {
         $pointsMap[$r['position']] = (int)$r['points'];
     }
 
-    // 2. Fetch all units
+    // 2. Fetch all units and create lookups
     $units = $pdo->query("SELECT id, name, short_code, color_code, logo_path FROM units ORDER BY name ASC")->fetchAll();
     $leaderboard = [];
+    $unitByCode = [];
+    $aliasMap = [
+        'SC' => 'SCZ',
+        'NC' => 'NCZ',
+        'NW' => 'NWZ'
+    ];
+
     foreach ($units as $u) {
+        $code = strtoupper(trim($u['short_code']));
+        $unitByCode[$code] = (int)$u['id'];
         $leaderboard[$u['id']] = [
-            'id' => $u['id'],
+            'id' => (int)$u['id'],
             'name' => $u['name'],
             'short_code' => $u['short_code'],
             'color_code' => $u['color_code'],
@@ -156,73 +165,179 @@ function get_overall_championship_leaderboard($pdo, $forceMode = null) {
         ];
     }
 
-    // 3. Scan completed matches for tournament podiums / finals
-    $matches = $pdo->query("
-        SELECT m.id, m.game_id, m.round, m.winner_id, m.team1_id, m.team2_id, m.scores_json,
-               g.name as game_name, g.category,
+    $resolveUnit = function($codeOrId) use ($unitByCode, $aliasMap, $leaderboard) {
+        if (!$codeOrId) return null;
+        if (is_numeric($codeOrId) && isset($leaderboard[(int)$codeOrId])) {
+            return (int)$codeOrId;
+        }
+        $c = strtoupper(trim((string)$codeOrId));
+        if (isset($aliasMap[$c])) {
+            $c = $aliasMap[$c];
+        }
+        return $unitByCode[$c] ?? null;
+    };
+
+    // 3. Swimming Finals & Direct Finals
+    $swimMatches = $pdo->query("
+        SELECT m.id, m.round, m.scores_json, g.name as game_name
+        FROM matches m
+        JOIN games g ON m.game_id = g.id
+        WHERE g.slug = 'swimming' AND m.status = 'completed'
+    ")->fetchAll(PDO::FETCH_ASSOC);
+
+    foreach ($swimMatches as $m) {
+        $round = strtolower($m['round']);
+        if (strpos($round, 'final') === false) {
+            continue; // Heats do not award podium points
+        }
+
+        $scores = json_decode($m['scores_json'] ?? '{}', true) ?: [];
+        $lanes = $scores['lanes'] ?? [];
+        $placements = $scores['placements'] ?? [];
+
+        if (!empty($lanes)) {
+            foreach ($lanes as $l) {
+                $pos = strtolower(trim($l['pos'] ?? ($l['position'] ?? '')));
+                $pUnit = $resolveUnit($l['zone'] ?? '');
+                if (!$pUnit || !isset($leaderboard[$pUnit])) continue;
+
+                if (strpos($pos, '1') === 0) {
+                    $pts = $pointsMap[1] ?? 5;
+                    $leaderboard[$pUnit]['gold']++;
+                    $leaderboard[$pUnit]['total_points'] += $pts;
+                    $leaderboard[$pUnit]['game_breakdown'][] = "Swimming {$m['round']} (1st: +$pts pts)";
+                } elseif (strpos($pos, '2') === 0) {
+                    $pts = $pointsMap[2] ?? 3;
+                    $leaderboard[$pUnit]['silver']++;
+                    $leaderboard[$pUnit]['total_points'] += $pts;
+                    $leaderboard[$pUnit]['game_breakdown'][] = "Swimming {$m['round']} (2nd: +$pts pts)";
+                } elseif (strpos($pos, '3') === 0) {
+                    $pts = $pointsMap[3] ?? 1;
+                    $leaderboard[$pUnit]['bronze']++;
+                    $leaderboard[$pUnit]['total_points'] += $pts;
+                    $leaderboard[$pUnit]['game_breakdown'][] = "Swimming {$m['round']} (3rd: +$pts pts)";
+                }
+            }
+        } elseif (!empty($placements)) {
+            foreach ($placements as $pl) {
+                $rank = (int)($pl['rank'] ?? 0);
+                $pUnit = $resolveUnit($pl['team'] ?? '');
+                if ($pUnit && isset($leaderboard[$pUnit]) && isset($pointsMap[$rank])) {
+                    $pts = $pointsMap[$rank];
+                    if ($rank === 1) $leaderboard[$pUnit]['gold']++;
+                    if ($rank === 2) $leaderboard[$pUnit]['silver']++;
+                    if ($rank === 3) $leaderboard[$pUnit]['bronze']++;
+                    $leaderboard[$pUnit]['total_points'] += $pts;
+                    $leaderboard[$pUnit]['game_breakdown'][] = "Swimming {$m['round']} (Rank $rank: +$pts pts)";
+                }
+            }
+        }
+    }
+
+    // 4. Bridge Standings (Super League if played, otherwise Swiss Matrix)
+    $stmtBridge = $pdo->query("SELECT id FROM games WHERE slug = 'bridge' LIMIT 1");
+    if ($bGameId = $stmtBridge->fetchColumn()) {
+        $bridgeRankings = null;
+        if (function_exists('get_bridge_super_league_data')) {
+            $slData = get_bridge_super_league_data($pdo, $bGameId);
+            $slPlayed = false;
+            foreach ($slData['matrix'] ?? [] as $row) {
+                if (($row['total_vp'] ?? 0) > 0) {
+                    $slPlayed = true;
+                    break;
+                }
+            }
+            if ($slPlayed) {
+                $bridgeRankings = array_values($slData['matrix']);
+                usort($bridgeRankings, fn($a, $b) => ($a['rank'] ?? 99) <=> ($b['rank'] ?? 99));
+            }
+        }
+        if (!$bridgeRankings && function_exists('get_bridge_swiss_matrix')) {
+            $swissData = get_bridge_swiss_matrix($pdo, $bGameId);
+            $bridgeRankings = $swissData['matrix'] ?? [];
+            usort($bridgeRankings, fn($a, $b) => ($a['rank'] ?? 99) <=> ($b['rank'] ?? 99));
+        }
+
+        if (!empty($bridgeRankings)) {
+            foreach ([0 => 1, 1 => 2, 2 => 3] as $idx => $rank) {
+                if (isset($bridgeRankings[$idx])) {
+                    $uId = $resolveUnit($bridgeRankings[$idx]['short_code'] ?? '');
+                    if ($uId && isset($leaderboard[$uId])) {
+                        $pts = $pointsMap[$rank] ?? 0;
+                        if ($rank === 1) $leaderboard[$uId]['gold']++;
+                        if ($rank === 2) $leaderboard[$uId]['silver']++;
+                        if ($rank === 3) $leaderboard[$uId]['bronze']++;
+                        $leaderboard[$uId]['total_points'] += $pts;
+                        $medalName = $rank === 1 ? '1st' : ($rank === 2 ? '2nd' : '3rd');
+                        $leaderboard[$uId]['game_breakdown'][] = "Bridge ($medalName: +$pts pts)";
+                    }
+                }
+            }
+        }
+    }
+
+    // 5. Chess Standings
+    $stmtChess = $pdo->query("SELECT id FROM games WHERE slug = 'chess' LIMIT 1");
+    if ($cGameId = $stmtChess->fetchColumn()) {
+        if (function_exists('get_chess_discipline_standings')) {
+            $chessStandings = get_chess_discipline_standings($pdo, $cGameId);
+            $chessList = array_values($chessStandings);
+            if (!empty($chessList) && ($chessList[0]['played'] ?? 0) > 0) {
+                foreach ([0 => 1, 1 => 2, 2 => 3] as $idx => $rank) {
+                    if (isset($chessList[$idx])) {
+                        $uId = $resolveUnit($chessList[$idx]['short_code'] ?? '');
+                        if ($uId && isset($leaderboard[$uId])) {
+                            $pts = $pointsMap[$rank] ?? 0;
+                            if ($rank === 1) $leaderboard[$uId]['gold']++;
+                            if ($rank === 2) $leaderboard[$uId]['silver']++;
+                            if ($rank === 3) $leaderboard[$uId]['bronze']++;
+                            $leaderboard[$uId]['total_points'] += $pts;
+                            $medalName = $rank === 1 ? '1st' : ($rank === 2 ? '2nd' : '3rd');
+                            $leaderboard[$uId]['game_breakdown'][] = "Chess ($medalName: +$pts pts)";
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 6. Knockout Matches & Championship Finals (Badminton, Tennis, Table Tennis, Carrom, etc.)
+    $koMatches = $pdo->query("
+        SELECT m.id, m.round, m.winner_id, m.team1_id, m.team2_id, g.name as game_name, g.slug as game_slug,
                t1.unit_id as t1_unit, t2.unit_id as t2_unit, tw.unit_id as win_unit
         FROM matches m
         JOIN games g ON m.game_id = g.id
         LEFT JOIN teams t1 ON m.team1_id = t1.id
         LEFT JOIN teams t2 ON m.team2_id = t2.id
         LEFT JOIN teams tw ON m.winner_id = tw.id
-        WHERE m.status = 'completed'
-    ")->fetchAll();
+        WHERE m.status = 'completed' AND g.slug NOT IN ('swimming', 'bridge', 'chess')
+    ")->fetchAll(PDO::FETCH_ASSOC);
 
-    foreach ($matches as $m) {
+    foreach ($koMatches as $m) {
         $round = strtolower($m['round']);
-        $scores = json_decode($m['scores_json'], true) ?? [];
-
-        // Special handling for Swimming Final
-        if (isset($scores['format']) && $scores['format'] === 'swimming' && !empty($scores['placements'])) {
-            foreach ($scores['placements'] as $pl) {
-                // Find unit by short code
-                $pUnit = null;
-                foreach ($units as $u) {
-                    if (strtoupper($u['short_code']) === strtoupper($pl['team'])) {
-                        $pUnit = $u['id'];
-                        break;
-                    }
-                }
-                if ($pUnit && isset($leaderboard[$pUnit])) {
-                    $rank = (int)$pl['rank'];
-                    $pts = $pointsMap[$rank] ?? 0;
-                    if ($rank === 1) $leaderboard[$pUnit]['gold']++;
-                    if ($rank === 2) $leaderboard[$pUnit]['silver']++;
-                    if ($rank === 3) $leaderboard[$pUnit]['bronze']++;
-                    $leaderboard[$pUnit]['total_points'] += $pts;
-                    $leaderboard[$pUnit]['game_breakdown'][] = "Swimming (Rank $rank: +$pts pts)";
-                }
-            }
-            continue;
-        }
-
-        // Finals across games (Gold = Winner, Silver = Runner-up)
         if (strpos($round, 'final') !== false && strpos($round, 'semi') === false && strpos($round, 'quarter') === false) {
-            $winUnit = $m['win_unit'];
+            $winUnit = $m['win_unit'] ?: $resolveUnit($m['winner_id']);
             $loseUnit = ($m['winner_id'] == $m['team1_id']) ? $m['t2_unit'] : $m['t1_unit'];
 
             if ($winUnit && isset($leaderboard[$winUnit])) {
                 $goldPts = $pointsMap[1] ?? 5;
                 $leaderboard[$winUnit]['gold']++;
                 $leaderboard[$winUnit]['total_points'] += $goldPts;
-                $leaderboard[$winUnit]['game_breakdown'][] = "{$m['game_name']} (1st: +$goldPts pts)";
+                $leaderboard[$winUnit]['game_breakdown'][] = "{$m['game_name']} {$m['round']} (1st: +$goldPts pts)";
             }
             if ($loseUnit && isset($leaderboard[$loseUnit])) {
                 $silverPts = $pointsMap[2] ?? 3;
                 $leaderboard[$loseUnit]['silver']++;
                 $leaderboard[$loseUnit]['total_points'] += $silverPts;
-                $leaderboard[$loseUnit]['game_breakdown'][] = "{$m['game_name']} (2nd: +$silverPts pts)";
+                $leaderboard[$loseUnit]['game_breakdown'][] = "{$m['game_name']} {$m['round']} (2nd: +$silverPts pts)";
             }
-        }
-        // 3rd Place Match
-        else if (strpos($round, '3rd') !== false || strpos($round, 'bronze') !== false) {
-            $bronzeUnit = $m['win_unit'];
+        } elseif (strpos($round, '3rd') !== false || strpos($round, 'bronze') !== false) {
+            $bronzeUnit = $m['win_unit'] ?: $resolveUnit($m['winner_id']);
             if ($bronzeUnit && isset($leaderboard[$bronzeUnit])) {
                 $bronzePts = $pointsMap[3] ?? 1;
                 $leaderboard[$bronzeUnit]['bronze']++;
                 $leaderboard[$bronzeUnit]['total_points'] += $bronzePts;
-                $leaderboard[$bronzeUnit]['game_breakdown'][] = "{$m['game_name']} (3rd: +$bronzePts pts)";
+                $leaderboard[$bronzeUnit]['game_breakdown'][] = "{$m['game_name']} {$m['round']} (3rd: +$bronzePts pts)";
             }
         }
     }

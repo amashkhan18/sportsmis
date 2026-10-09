@@ -15,14 +15,14 @@ if (!$game) {
 }
 $gameId = (int)$game['id'];
 
-$roundLabels = [
+$swissRoundLabels = [
     1 => 'R-I',
     2 => 'R-II',
     3 => 'R-III',
     4 => 'R-IV',
     5 => 'R-V'
 ];
-$roundNames = [
+$swissRoundNames = [
     1 => 'Round 1 (R-I)',
     2 => 'Round 2 (R-II)',
     3 => 'Round 3 (R-III)',
@@ -30,20 +30,38 @@ $roundNames = [
     5 => 'Round 5 (R-V)'
 ];
 
-// GET: Return current Swiss matrix & round fixtures
+$slRoundLabels = [
+    1 => 'SL-I',
+    2 => 'SL-II',
+    3 => 'SL-III'
+];
+$slRoundNames = [
+    1 => 'Super League R-1 (SL-I)',
+    2 => 'Super League R-2 (SL-II)',
+    3 => 'Super League R-3 (SL-III)'
+];
+
+// GET: Return current Swiss matrix & Super League Finals data
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {
-    $data = get_bridge_swiss_matrix($pdo, $gameId);
+    $swissData = get_bridge_swiss_matrix($pdo, $gameId);
+    $slData = get_bridge_super_league_data($pdo, $gameId);
+
     echo json_encode([
         'status' => 'success',
         'game_id' => $gameId,
-        'matrix' => array_values($data['matrix']),
-        'fixtures' => $data['fixtures'],
-        'canonical_teams' => $data['canonical_teams']
+        'matrix' => array_values($swissData['matrix']),
+        'fixtures' => $swissData['fixtures'],
+        'canonical_teams' => $swissData['canonical_teams'],
+        'super_league' => [
+            'matrix' => array_values($slData['matrix']),
+            'fixtures' => $slData['fixtures'],
+            'qualified_teams' => $slData['qualified_teams']
+        ]
     ]);
     exit;
 }
 
-// POST: Save / Update round-wise scores
+// POST: Save / Update round-wise scores (Swiss or Super League)
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $input = json_decode(file_get_contents('php://input'), true);
     if (!$input) {
@@ -52,16 +70,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
-    $roundNo = (int)($input['round_no'] ?? 0);
-    if ($roundNo < 1 || $roundNo > 5) {
-        http_response_code(400);
-        echo json_encode(['status' => 'error', 'message' => 'Invalid round number. Must be 1 to 5.']);
-        exit;
+    $stage = trim($input['stage'] ?? 'swiss');
+    if ($stage === 'super_league' || $stage === 'finals') {
+        $stage = 'super_league';
+    } else {
+        $stage = 'swiss';
     }
 
-    $roundLabel = $roundLabels[$roundNo];
-    $roundName = $roundNames[$roundNo];
+    $roundNo = (int)($input['round_no'] ?? 0);
     $tables = $input['tables'] ?? [];
+
+    if ($stage === 'super_league') {
+        if ($roundNo < 1 || $roundNo > 3) {
+            http_response_code(400);
+            echo json_encode(['status' => 'error', 'message' => 'Invalid Super League round number. Must be 1 to 3.']);
+            exit;
+        }
+        $roundLabel = $slRoundLabels[$roundNo];
+        $roundName = $slRoundNames[$roundNo];
+        $matchDate = '2026-10-10';
+    } else {
+        if ($roundNo < 1 || $roundNo > 5) {
+            http_response_code(400);
+            echo json_encode(['status' => 'error', 'message' => 'Invalid Swiss round number. Must be 1 to 5.']);
+            exit;
+        }
+        $roundLabel = $swissRoundLabels[$roundNo];
+        $roundName = $swissRoundNames[$roundNo];
+        $matchDate = '2026-10-09';
+    }
 
     if (!is_array($tables) || empty($tables)) {
         http_response_code(400);
@@ -103,6 +140,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $scoresPayload = [
             'type' => 'bridge',
+            'stage' => $stage,
             'round_no' => $roundNo,
             'round_label' => $roundLabel,
             'table_no' => $tableNo,
@@ -114,7 +152,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'summary' => "{$roundLabel} Table {$tableNo}: " . ($vpA !== null ? "{$vpA} - {$vpB} VPs" : "Scheduled")
         ];
 
-        // Check if existing match exists
+        // Check if match exists
         if (!$matchId) {
             $stmt = $pdo->prepare("
                 SELECT id FROM matches 
@@ -131,16 +169,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($matchId) {
             $stmt = $pdo->prepare("
                 UPDATE matches 
-                SET team1_id = ?, team2_id = ?, winner_id = ?, status = ?, scores_json = ?, pool_name = ?
+                SET team1_id = ?, team2_id = ?, winner_id = ?, status = ?, scores_json = ?, pool_name = ?, match_date = ?
                 WHERE id = ?
             ");
-            $stmt->execute([$t1Id, $t2Id, $winnerId, $status, json_encode($scoresPayload), "Table $tableNo", $matchId]);
+            $stmt->execute([$t1Id, $t2Id, $winnerId, $status, json_encode($scoresPayload), "Table $tableNo", $matchDate, $matchId]);
         } else {
             $stmt = $pdo->prepare("
                 INSERT INTO matches (game_id, round, pool_name, team1_id, team2_id, winner_id, status, scores_json, match_date, start_time, end_time)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, '2026-10-09', '10:00:00', '12:00:00')
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '10:00:00', '12:00:00')
             ");
-            $stmt->execute([$gameId, $roundName, "Table $tableNo", $t1Id, $t2Id, $winnerId, $status, json_encode($scoresPayload)]);
+            $stmt->execute([$gameId, $roundName, "Table $tableNo", $t1Id, $t2Id, $winnerId, $status, json_encode($scoresPayload), $matchDate]);
         }
         $savedCount++;
     }
@@ -149,17 +187,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $pdo,
         3, // Volunteer / Admin user
         'BRIDGE_ROUND_SCORES_SAVED',
-        "Saved round-wise scores for Bridge {$roundLabel} ({$savedCount} tables processed)."
+        "Saved scores for Bridge [Stage: {$stage}] {$roundLabel} ({$savedCount} tables processed)."
     );
 
-    // Return updated matrix
-    $updated = get_bridge_swiss_matrix($pdo, $gameId);
+    // Return updated matrix and super league
+    $updatedSwiss = get_bridge_swiss_matrix($pdo, $gameId);
+    $updatedSL = get_bridge_super_league_data($pdo, $gameId);
+
     echo json_encode([
         'status' => 'success',
-        'message' => "Round {$roundLabel} scores saved successfully!",
+        'message' => ($stage === 'super_league' ? "Super League {$roundLabel}" : "Round {$roundLabel}") . " scores saved successfully!",
         'saved_count' => $savedCount,
-        'matrix' => array_values($updated['matrix']),
-        'fixtures' => $updated['fixtures']
+        'matrix' => array_values($updatedSwiss['matrix']),
+        'fixtures' => $updatedSwiss['fixtures'],
+        'super_league' => [
+            'matrix' => array_values($updatedSL['matrix']),
+            'fixtures' => $updatedSL['fixtures'],
+            'qualified_teams' => $updatedSL['qualified_teams']
+        ]
     ]);
     exit;
 }
