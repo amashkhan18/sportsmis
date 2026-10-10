@@ -1403,11 +1403,18 @@ if (session_status() === PHP_SESSION_NONE) {
             let scoresPayload = {};
             let winnerId = null;
 
+            const pending = pendingSync.find(p => p.id == id);
+            const saved = (pending && pending.scores_json) ? pending.scores_json : 
+                          (typeof m.scores_json === 'object' && m.scores_json !== null ? m.scores_json : 
+                          (typeof m.scores_json === 'string' && m.scores_json ? JSON.parse(m.scores_json || '{}') : {}));
+
             if (sportType === 'badminton' || sportType === 'table_tennis' || sportType === 'badminton_table_tennis') {
                 const isTT = (m.game_slug && m.game_slug.includes('table-tennis')) || (m.game_name && m.game_name.toLowerCase().includes('table tennis'));
                 const isOpenCategory = (m.category === 'Open Category' || (m.game_slug && m.game_slug.includes('open')) || (m.game_name && m.game_name.toLowerCase().includes('open')));
                 const isWomen = (m.round && m.round.toLowerCase().includes('women'));
-                const isBestOf5 = (isTT && !isWomen) || isOpenCategory || !!saved.is_best_of_5 || (saved.g4_a !== undefined && saved.g4_a !== null && saved.g4_a !== '') || (saved.g5_a !== undefined && saved.g5_a !== null && saved.g5_a !== '');
+                const isBestOf5 = (typeof window.currentBttIsBestOf5 !== 'undefined') 
+                    ? window.currentBttIsBestOf5 
+                    : ((isTT && !isWomen) || isOpenCategory || !!saved.is_best_of_5 || (saved.g4_a !== undefined && saved.g4_a !== null && saved.g4_a !== '') || (saved.g5_a !== undefined && saved.g5_a !== null && saved.g5_a !== ''));
 
                 const g1a = document.getElementById('btt_g1_a').value.trim();
                 const g1b = document.getElementById('btt_g1_b').value.trim();
