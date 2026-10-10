@@ -285,7 +285,8 @@ if (session_status() === PHP_SESSION_NONE) {
                 <div class="d-flex align-items-center gap-2">
                     <select id="sportFilter" class="form-select form-select-sm" style="width: auto; min-width: 140px;" onchange="onSportFilterChange()">
                         <option value="all">All Sports</option>
-                        <option value="badminton_table_tennis">Badminton & TT</option>
+                        <option value="badminton">Badminton</option>
+                        <option value="table_tennis">Table Tennis</option>
                         <option value="tennis">Lawn Tennis</option>
                         <option value="chess">Chess</option>
                         <option value="carrom">Carrom</option>
@@ -388,6 +389,10 @@ if (session_status() === PHP_SESSION_NONE) {
                     <span id="bttFormatText"><i class="fas fa-table-tennis me-1"></i> <strong>Men's Table Tennis:</strong> Best of 5 Games (First to 3)</span>
                     <span class="badge bg-primary" id="bttFormatBadge">Best of 5</span>
                 </div>
+                <div id="bttMatchDecidedBanner" class="alert alert-success py-1 px-2 small mb-2 d-none align-items-center shadow-sm">
+                    <i class="fas fa-trophy me-2 text-warning fs-5"></i>
+                    <span id="bttMatchDecidedText" class="fw-bold"></span>
+                </div>
                 <div class="table-responsive mb-2">
                     <table class="table table-bordered table-sm text-center align-middle mb-1">
                         <thead class="table-light small">
@@ -424,13 +429,13 @@ if (session_status() === PHP_SESSION_NONE) {
                                 <td class="btt-extra-col">
                                     <div class="d-flex align-items-center justify-content-center gap-1">
                                         <input type="number" id="btt_g4_a" class="form-control form-control-sm text-center fw-bold score-pill-input" min="0" max="99" placeholder="0">
-                                        <button type="button" class="btn btn-outline-primary btn-inc btn-sm" onclick="incScore('btt_g4_a', 1)">+1</button>
+                                        <button type="button" class="btn btn-outline-primary btn-inc btn-sm btt-g4-btn" onclick="incScore('btt_g4_a', 1)">+1</button>
                                     </div>
                                 </td>
                                 <td class="btt-extra-col">
                                     <div class="d-flex align-items-center justify-content-center gap-1">
                                         <input type="number" id="btt_g5_a" class="form-control form-control-sm text-center fw-bold score-pill-input" min="0" max="99" placeholder="0">
-                                        <button type="button" class="btn btn-outline-primary btn-inc btn-sm" onclick="incScore('btt_g5_a', 1)">+1</button>
+                                        <button type="button" class="btn btn-outline-primary btn-inc btn-sm btt-g5-btn" onclick="incScore('btt_g5_a', 1)">+1</button>
                                     </div>
                                 </td>
                             </tr>
@@ -457,13 +462,13 @@ if (session_status() === PHP_SESSION_NONE) {
                                 <td class="btt-extra-col">
                                     <div class="d-flex align-items-center justify-content-center gap-1">
                                         <input type="number" id="btt_g4_b" class="form-control form-control-sm text-center fw-bold score-pill-input" min="0" max="99" placeholder="0">
-                                        <button type="button" class="btn btn-outline-primary btn-inc btn-sm" onclick="incScore('btt_g4_b', 1)">+1</button>
+                                        <button type="button" class="btn btn-outline-primary btn-inc btn-sm btt-g4-btn" onclick="incScore('btt_g4_b', 1)">+1</button>
                                     </div>
                                 </td>
                                 <td class="btt-extra-col">
                                     <div class="d-flex align-items-center justify-content-center gap-1">
                                         <input type="number" id="btt_g5_b" class="form-control form-control-sm text-center fw-bold score-pill-input" min="0" max="99" placeholder="0">
-                                        <button type="button" class="btn btn-outline-primary btn-inc btn-sm" onclick="incScore('btt_g5_b', 1)">+1</button>
+                                        <button type="button" class="btn btn-outline-primary btn-inc btn-sm btt-g5-btn" onclick="incScore('btt_g5_b', 1)">+1</button>
                                     </div>
                                 </td>
                             </tr>
@@ -1019,7 +1024,8 @@ if (session_status() === PHP_SESSION_NONE) {
 
         function getSportTypeFromSlug(slug) {
             slug = (slug || '').toLowerCase();
-            if (slug.includes('badminton') || slug.includes('table-tennis')) return 'badminton_table_tennis';
+            if (slug.includes('table-tennis')) return 'table_tennis';
+            if (slug.includes('badminton')) return 'badminton';
             if (slug.includes('tennis')) return 'tennis';
             if (slug.includes('chess')) return 'chess';
             if (slug.includes('carrom')) return 'carrom';
@@ -1053,12 +1059,115 @@ if (session_status() === PHP_SESSION_NONE) {
             }
         };
 
+        // Reactive checker for Badminton / TT games (Best of 5, first to 3 wins)
+        window.checkBttGameWinners = function() {
+            const m = window.currentBttMatch;
+            const isBestOf5 = window.currentBttIsBestOf5 || false;
+            let winsA = 0;
+            let winsB = 0;
+            
+            // Evaluate Game 1 to 5
+            for (let i = 1; i <= 5; i++) {
+                const inpA = document.getElementById(`btt_g${i}_a`);
+                const inpB = document.getElementById(`btt_g${i}_b`);
+                if (!inpA || !inpB) continue;
+
+                const valA = inpA.value.trim();
+                const valB = inpB.value.trim();
+                if (valA !== '' && valB !== '') {
+                    const pA = parseInt(valA, 10);
+                    const pB = parseInt(valB, 10);
+                    if (!isNaN(pA) && !isNaN(pB) && pA !== pB) {
+                        if (pA > pB) winsA++;
+                        else winsB++;
+                    }
+                }
+            }
+
+            const banner = document.getElementById('bttMatchDecidedBanner');
+            const bannerText = document.getElementById('bttMatchDecidedText');
+            const winnerSel = document.getElementById('bttWinner');
+
+            if (isBestOf5) {
+                const g4InpA = document.getElementById('btt_g4_a');
+                const g4InpB = document.getElementById('btt_g4_b');
+                const g5InpA = document.getElementById('btt_g5_a');
+                const g5InpB = document.getElementById('btt_g5_b');
+                const g4Btns = document.querySelectorAll('.btt-g4-btn');
+                const g5Btns = document.querySelectorAll('.btt-g5-btn');
+
+                if (winsA >= 3 || winsB >= 3) {
+                    const winnerName = (winsA >= 3) ? (m ? m.team1_name : 'Player 1') : (m ? m.team2_name : 'Player 2');
+                    const winnerId = (winsA >= 3) ? (m ? m.team1_id : null) : (m ? m.team2_id : null);
+                    
+                    // If won in first 3 games (3-0): Games 4 and 5 are not required!
+                    // If won in 4 games (3-1): Game 5 is not required!
+                    if (winsA + winsB <= 3) {
+                        if (g4InpA) { g4InpA.disabled = true; g4InpA.value = ''; g4InpA.placeholder = 'N/A'; }
+                        if (g4InpB) { g4InpB.disabled = true; g4InpB.value = ''; g4InpB.placeholder = 'N/A'; }
+                        g4Btns.forEach(btn => { btn.disabled = true; });
+
+                        if (g5InpA) { g5InpA.disabled = true; g5InpA.value = ''; g5InpA.placeholder = 'N/A'; }
+                        if (g5InpB) { g5InpB.disabled = true; g5InpB.value = ''; g5InpB.placeholder = 'N/A'; }
+                        g5Btns.forEach(btn => { btn.disabled = true; });
+                    } else if (winsA + winsB === 4) {
+                        if (g4InpA) g4InpA.disabled = false;
+                        if (g4InpB) g4InpB.disabled = false;
+                        g4Btns.forEach(btn => { btn.disabled = false; });
+
+                        if (g5InpA) { g5InpA.disabled = true; g5InpA.value = ''; g5InpA.placeholder = 'N/A'; }
+                        if (g5InpB) { g5InpB.disabled = true; g5InpB.value = ''; g5InpB.placeholder = 'N/A'; }
+                        g5Btns.forEach(btn => { btn.disabled = true; });
+                    }
+
+                    if (banner && bannerText) {
+                        bannerText.innerHTML = `<strong>Match Concluded (First to 3 Wins):</strong> ${winnerName} won 3 games (${winsA}-${winsB})! No further games are required.`;
+                        banner.classList.remove('d-none');
+                        banner.classList.add('d-flex');
+                    }
+
+                    if (winnerSel && winnerId) {
+                        winnerSel.value = winnerId;
+                    }
+                } else {
+                    if (g4InpA) { g4InpA.disabled = false; if (g4InpA.placeholder === 'N/A') g4InpA.placeholder = '0'; }
+                    if (g4InpB) { g4InpB.disabled = false; if (g4InpB.placeholder === 'N/A') g4InpB.placeholder = '0'; }
+                    g4Btns.forEach(btn => { btn.disabled = false; });
+
+                    if (g5InpA) { g5InpA.disabled = false; if (g5InpA.placeholder === 'N/A') g5InpA.placeholder = '0'; }
+                    if (g5InpB) { g5InpB.disabled = false; if (g5InpB.placeholder === 'N/A') g5InpB.placeholder = '0'; }
+                    g5Btns.forEach(btn => { btn.disabled = false; });
+
+                    if (banner) {
+                        banner.classList.add('d-none');
+                        banner.classList.remove('d-flex');
+                    }
+                }
+            }
+        };
+
+        // Bind input event to all Badminton & TT score inputs for real-time reactivity
+        function initBttScoreListeners() {
+            document.querySelectorAll('#formBadmintonTT input[type="number"]').forEach(inp => {
+                inp.removeEventListener('input', checkBttGameWinners);
+                inp.addEventListener('input', checkBttGameWinners);
+            });
+        }
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initBttScoreListeners);
+        } else {
+            initBttScoreListeners();
+        }
+
         // Quick increment helper
         window.incScore = function(elemId, step) {
             const input = document.getElementById(elemId);
-            if (input) {
+            if (input && !input.disabled) {
                 const val = parseInt(input.value || 0, 10);
                 input.value = Math.max(0, val + step);
+                if (elemId.startsWith('btt_')) {
+                    checkBttGameWinners();
+                }
             }
         };
 
@@ -1124,7 +1233,7 @@ if (session_status() === PHP_SESSION_NONE) {
                           (typeof m.scores_json === 'object' && m.scores_json !== null ? m.scores_json : 
                           (typeof m.scores_json === 'string' && m.scores_json ? JSON.parse(m.scores_json || '{}') : {}));
 
-            if (sportType === 'badminton_table_tennis') {
+            if (sportType === 'badminton' || sportType === 'table_tennis' || sportType === 'badminton_table_tennis') {
                 document.getElementById('formBadmintonTT').classList.remove('d-none');
                 document.getElementById('bttTeam1Label').innerHTML = `<span class="badge me-1" style="background-color: ${m.u1_color || '#003366'}">${m.u1_code || 'T1'}</span> ${m.team1_name}`;
                 document.getElementById('bttTeam2Label').innerHTML = `<span class="badge me-1" style="background-color: ${m.u2_color || '#003366'}">${m.u2_code || 'T2'}</span> ${m.team2_name}`;
@@ -1132,14 +1241,23 @@ if (session_status() === PHP_SESSION_NONE) {
                 document.getElementById('bttSrvTeam2Label').innerText = `${m.u2_code || 'T2'} Serving`;
 
                 const isTT = (m.game_slug && m.game_slug.includes('table-tennis')) || (m.game_name && m.game_name.toLowerCase().includes('table tennis'));
+                const isOpenCategory = (m.category === 'Open Category' || (m.game_slug && m.game_slug.includes('open')) || (m.game_name && m.game_name.toLowerCase().includes('open')));
                 const isWomen = (m.round && m.round.toLowerCase().includes('women'));
-                const isBestOf5 = (isTT && !isWomen) || !!saved.is_best_of_5 || (saved.g4_a !== undefined && saved.g4_a !== null && saved.g4_a !== '') || (saved.g5_a !== undefined && saved.g5_a !== null && saved.g5_a !== '');
+                const isBestOf5 = (isTT && !isWomen) || isOpenCategory || !!saved.is_best_of_5 || (saved.g4_a !== undefined && saved.g4_a !== null && saved.g4_a !== '') || (saved.g5_a !== undefined && saved.g5_a !== null && saved.g5_a !== '');
+
+                window.currentBttMatch = m;
+                window.currentBttIsBestOf5 = isBestOf5;
 
                 const extraCols = document.querySelectorAll('.btt-extra-col');
                 const bannerText = document.getElementById('bttFormatText');
                 const bannerBadge = document.getElementById('bttFormatBadge');
 
-                if (isBestOf5) {
+                if (isOpenCategory) {
+                    extraCols.forEach(el => el.classList.remove('d-none'));
+                    bannerText.innerHTML = `<i class="fas fa-medal me-1 text-warning"></i> <strong>Open Category (${m.game_name}):</strong> Best of 5 Games (First to 3 Wins)`;
+                    bannerBadge.className = 'badge bg-warning text-dark font-weight-bold';
+                    bannerBadge.innerText = 'Best of 5';
+                } else if (isBestOf5) {
                     extraCols.forEach(el => el.classList.remove('d-none'));
                     bannerText.innerHTML = `<i class="fas fa-table-tennis me-1"></i> <strong>Men's Table Tennis:</strong> Best of 5 Games (First to 3 Wins)`;
                     bannerBadge.className = 'badge bg-primary';
@@ -1170,6 +1288,8 @@ if (session_status() === PHP_SESSION_NONE) {
                 if (saved.server === 'team2') document.getElementById('btt_srv_b').checked = true;
                 else document.getElementById('btt_srv_a').checked = true;
                 document.getElementById('bttWinner').value = (pending ? pending.winner_id : m.winner_id) || '';
+
+                checkBttGameWinners();
 
             } else if (sportType === 'tennis') {
                 document.getElementById('formTennis').classList.remove('d-none');
@@ -1283,10 +1403,11 @@ if (session_status() === PHP_SESSION_NONE) {
             let scoresPayload = {};
             let winnerId = null;
 
-            if (sportType === 'badminton_table_tennis') {
+            if (sportType === 'badminton' || sportType === 'table_tennis' || sportType === 'badminton_table_tennis') {
                 const isTT = (m.game_slug && m.game_slug.includes('table-tennis')) || (m.game_name && m.game_name.toLowerCase().includes('table tennis'));
+                const isOpenCategory = (m.category === 'Open Category' || (m.game_slug && m.game_slug.includes('open')) || (m.game_name && m.game_name.toLowerCase().includes('open')));
                 const isWomen = (m.round && m.round.toLowerCase().includes('women'));
-                const isBestOf5 = (isTT && !isWomen);
+                const isBestOf5 = (isTT && !isWomen) || isOpenCategory || !!saved.is_best_of_5 || (saved.g4_a !== undefined && saved.g4_a !== null && saved.g4_a !== '') || (saved.g5_a !== undefined && saved.g5_a !== null && saved.g5_a !== '');
 
                 const g1a = document.getElementById('btt_g1_a').value.trim();
                 const g1b = document.getElementById('btt_g1_b').value.trim();
@@ -1294,10 +1415,14 @@ if (session_status() === PHP_SESSION_NONE) {
                 const g2b = document.getElementById('btt_g2_b').value.trim();
                 const g3a = document.getElementById('btt_g3_a').value.trim();
                 const g3b = document.getElementById('btt_g3_b').value.trim();
-                const g4a = document.getElementById('btt_g4_a').value.trim();
-                const g4b = document.getElementById('btt_g4_b').value.trim();
-                const g5a = document.getElementById('btt_g5_a').value.trim();
-                const g5b = document.getElementById('btt_g5_b').value.trim();
+                const g4InpA = document.getElementById('btt_g4_a');
+                const g4InpB = document.getElementById('btt_g4_b');
+                const g5InpA = document.getElementById('btt_g5_a');
+                const g5InpB = document.getElementById('btt_g5_b');
+                const g4a = (g4InpA && !g4InpA.disabled) ? g4InpA.value.trim() : '';
+                const g4b = (g4InpB && !g4InpB.disabled) ? g4InpB.value.trim() : '';
+                const g5a = (g5InpA && !g5InpA.disabled) ? g5InpA.value.trim() : '';
+                const g5b = (g5InpB && !g5InpB.disabled) ? g5InpB.value.trim() : '';
                 const server = document.querySelector('input[name="btt_server"]:checked')?.value || 'team1';
                 winnerId = document.getElementById('bttWinner').value;
 
@@ -1311,11 +1436,11 @@ if (session_status() === PHP_SESSION_NONE) {
                 if (g1a !== '' || g1b !== '') sets.push(`${g1a || 0}-${g1b || 0}`);
                 if (g2a !== '' || g2b !== '') sets.push(`${g2a || 0}-${g2b || 0}`);
                 if (g3a !== '' || g3b !== '') sets.push(`${g3a || 0}-${g3b || 0}`);
-                if (isBestOf5 || g4a !== '' || g4b !== '') {
-                    if (g4a !== '' || g4b !== '') sets.push(`${g4a || 0}-${g4b || 0}`);
+                if (isBestOf5 && (!g4InpA || !g4InpA.disabled) && (g4a !== '' || g4b !== '')) {
+                    sets.push(`${g4a || 0}-${g4b || 0}`);
                 }
-                if (isBestOf5 || g5a !== '' || g5b !== '') {
-                    if (g5a !== '' || g5b !== '') sets.push(`${g5a || 0}-${g5b || 0}`);
+                if (isBestOf5 && (!g5InpA || !g5InpA.disabled) && (g5a !== '' || g5b !== '')) {
+                    sets.push(`${g5a || 0}-${g5b || 0}`);
                 }
                 
                 let summaryStr = sets.length > 0 ? sets.join(', ') : 'In Progress';
@@ -1327,7 +1452,7 @@ if (session_status() === PHP_SESSION_NONE) {
                 }
 
                 scoresPayload = {
-                    type: sportType,
+                    type: 'badminton_table_tennis',
                     is_best_of_5: isBestOf5 ? 1 : 0,
                     g1_a: g1a !== '' ? parseInt(g1a) : null,
                     g1_b: g1b !== '' ? parseInt(g1b) : null,
@@ -1335,10 +1460,10 @@ if (session_status() === PHP_SESSION_NONE) {
                     g2_b: g2b !== '' ? parseInt(g2b) : null,
                     g3_a: g3a !== '' ? parseInt(g3a) : null,
                     g3_b: g3b !== '' ? parseInt(g3b) : null,
-                    g4_a: g4a !== '' ? parseInt(g4a) : null,
-                    g4_b: g4b !== '' ? parseInt(g4b) : null,
-                    g5_a: g5a !== '' ? parseInt(g5a) : null,
-                    g5_b: g5b !== '' ? parseInt(g5b) : null,
+                    g4_a: (g4InpA && !g4InpA.disabled && g4a !== '') ? parseInt(g4a) : null,
+                    g4_b: (g4InpB && !g4InpB.disabled && g4b !== '') ? parseInt(g4b) : null,
+                    g5_a: (g5InpA && !g5InpA.disabled && g5a !== '') ? parseInt(g5a) : null,
+                    g5_b: (g5InpB && !g5InpB.disabled && g5b !== '') ? parseInt(g5b) : null,
                     server: server,
                     status: isFinal ? 'completed' : 'live',
                     winner_name: isFinal && winnerId ? (winnerId == m.team1_id ? m.team1_name : m.team2_name) : null,

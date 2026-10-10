@@ -40,6 +40,16 @@ try {
     $pdo = new PDO("mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=utf8mb4", DB_USER, DB_PASS);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+
+    // Auto-migration safeguard for athlete names in open categories
+    try {
+        $colCheck = $pdo->query("SHOW COLUMNS FROM matches LIKE 'athlete1_name'")->fetch();
+        if (!$colCheck) {
+            $pdo->exec("ALTER TABLE matches ADD COLUMN athlete1_name VARCHAR(150) NULL AFTER team2_id, ADD COLUMN athlete2_name VARCHAR(150) NULL AFTER athlete1_name");
+        }
+    } catch (Exception $e) {
+        // Suppress migration errors if already present or restricted
+    }
 } catch (PDOException $e) {
     die("Database connection failed: " . $e->getMessage());
 }

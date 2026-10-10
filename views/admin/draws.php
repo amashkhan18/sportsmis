@@ -250,54 +250,123 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $game_id = (int)($_POST['game_id'] ?? 0);
         $round = trim($_POST['round'] ?? 'Round 1');
         $pool_name = trim($_POST['pool_name'] ?? '');
-        $team1_id = (int)($_POST['team1_id'] ?? 0);
-        $team2_id = (int)($_POST['team2_id'] ?? 0);
-        $facility_id = (int)($_POST['facility_id'] ?? 0);
+        $team1_id = (int)($_POST['team1_id'] ?? ($_POST['team1_id_open'] ?? 0)) ?: null;
+        $team2_id = (int)($_POST['team2_id'] ?? ($_POST['team2_id_open'] ?? 0)) ?: null;
+        $athlete1_name = trim($_POST['athlete1_name'] ?? '');
+        $athlete2_name = trim($_POST['athlete2_name'] ?? '');
+        $facility_id = (int)($_POST['facility_id'] ?? 0) ?: null;
         $match_date = $_POST['match_date'] ?? '2026-10-08';
         $start_time = $_POST['start_time'] ?? '09:00:00';
         $end_time = $_POST['end_time'] ?? '10:15:00';
         $is_pub = isset($_POST['is_published']) ? 1 : 0;
 
-        if ($game_id > 0 && $team1_id > 0 && $team2_id > 0) {
-            $stmt = $pdo->prepare("
-                INSERT INTO matches (game_id, round, pool_name, team1_id, team2_id, facility_id, match_date, start_time, end_time, status, is_published)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?)
-            ");
-            $stmt->execute([$game_id, $round, $pool_name ?: null, $team1_id, $team2_id, $facility_id ?: null, $match_date, $start_time, $end_time, $is_pub]);
-            $newId = $pdo->lastInsertId();
-            log_audit_event($pdo, $_SESSION['user_id'] ?? 1, 'CREATE_MATCH', "Manually created Match #$newId ($round) for Game #$game_id");
-            $msg = "Match #$newId created successfully!";
-            $selectedGameId = $game_id;
+        $gCheck = $pdo->prepare("SELECT name, category FROM games WHERE id = ?");
+        $gCheck->execute([$game_id]);
+        $gRow = $gCheck->fetch();
+        $isGameOpen = ($gRow && (stripos($gRow['name'], 'Open') !== false || ($gRow['category'] ?? '') === 'Open Category'));
+
+        if ($isGameOpen) {
+            if ($athlete1_name !== '' && $athlete2_name !== '') {
+                // Auto-detect unit teams if not explicitly selected
+                if (!$team1_id && $athlete1_name !== '') {
+                    $pFind = $pdo->prepare("
+                        SELECT t.id 
+                        FROM players p 
+                        JOIN teams t ON t.unit_id = p.unit_id AND t.game_id = ?
+                        WHERE p.name = ? 
+                        LIMIT 1
+                    ");
+                    $pFind->execute([$game_id, $athlete1_name]);
+                    $team1_id = (int)$pFind->fetchColumn() ?: null;
+                }
+                if (!$team2_id && $athlete2_name !== '') {
+                    $pFind = $pdo->prepare("
+                        SELECT t.id 
+                        FROM players p 
+                        JOIN teams t ON t.unit_id = p.unit_id AND t.game_id = ?
+                        WHERE p.name = ? 
+                        LIMIT 1
+                    ");
+                    $pFind->execute([$game_id, $athlete2_name]);
+                    $team2_id = (int)$pFind->fetchColumn() ?: null;
+                }
+
+                $stmt = $pdo->prepare("
+                    INSERT INTO matches (game_id, round, pool_name, team1_id, team2_id, athlete1_name, athlete2_name, facility_id, match_date, start_time, end_time, status, is_published)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?)
+                ");
+                $stmt->execute([$game_id, $round, $pool_name ?: null, $team1_id, $team2_id, $athlete1_name, $athlete2_name, $facility_id, $match_date, $start_time, $end_time, $is_pub]);
+                $newId = $pdo->lastInsertId();
+                log_audit_event($pdo, $_SESSION['user_id'] ?? 1, 'CREATE_MATCH', "Manually created Match #$newId ($round: $athlete1_name vs $athlete2_name) for Game #$game_id");
+                $msg = "Open Category Match #$newId ($athlete1_name vs $athlete2_name) created successfully!";
+                $selectedGameId = $game_id;
+            } else {
+                $err = "Please enter athlete names for both competitors.";
+            }
         } else {
-            $err = "Please select both teams and ensure valid match details.";
+            if ($game_id > 0 && $team1_id > 0 && $team2_id > 0) {
+                $stmt = $pdo->prepare("
+                    INSERT INTO matches (game_id, round, pool_name, team1_id, team2_id, athlete1_name, athlete2_name, facility_id, match_date, start_time, end_time, status, is_published)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?)
+                ");
+                $stmt->execute([$game_id, $round, $pool_name ?: null, $team1_id, $team2_id, null, null, $facility_id, $match_date, $start_time, $end_time, $is_pub]);
+                $newId = $pdo->lastInsertId();
+                log_audit_event($pdo, $_SESSION['user_id'] ?? 1, 'CREATE_MATCH', "Manually created Match #$newId ($round) for Game #$game_id");
+                $msg = "Match #$newId created successfully!";
+                $selectedGameId = $game_id;
+            } else {
+                $err = "Please select both teams and ensure valid match details.";
+            }
         }
     } elseif ($action === 'update_match') {
         $match_id = (int)($_POST['match_id'] ?? 0);
         $game_id = (int)($_POST['game_id'] ?? 0);
         $round = trim($_POST['round'] ?? '');
         $pool_name = trim($_POST['pool_name'] ?? '');
-        $team1_id = (int)($_POST['team1_id'] ?? 0);
-        $team2_id = (int)($_POST['team2_id'] ?? 0);
-        $facility_id = (int)($_POST['facility_id'] ?? 0);
+        $team1_id = (int)($_POST['team1_id'] ?? 0) ?: null;
+        $team2_id = (int)($_POST['team2_id'] ?? 0) ?: null;
+        $athlete1_name = trim($_POST['athlete1_name'] ?? '');
+        $athlete2_name = trim($_POST['athlete2_name'] ?? '');
+        $facility_id = (int)($_POST['facility_id'] ?? 0) ?: null;
         $match_date = $_POST['match_date'] ?? '';
         $start_time = $_POST['start_time'] ?? '';
         $end_time = $_POST['end_time'] ?? '';
         $status = $_POST['status'] ?? 'scheduled';
         $is_pub = isset($_POST['is_published']) ? 1 : 0;
 
-        if ($match_id > 0 && $team1_id > 0 && $team2_id > 0) {
+        $gCheck = $pdo->prepare("SELECT name, category FROM games WHERE id = ?");
+        $gCheck->execute([$game_id]);
+        $gRow = $gCheck->fetch();
+        $isGameOpen = ($gRow && (stripos($gRow['name'], 'Open') !== false || ($gRow['category'] ?? '') === 'Open Category'));
+
+        if ($isGameOpen) {
+            if (!$team1_id && $athlete1_name !== '') {
+                $pFind = $pdo->prepare("SELECT t.id FROM players p JOIN teams t ON t.unit_id = p.unit_id AND t.game_id = ? WHERE p.name = ? LIMIT 1");
+                $pFind->execute([$game_id, $athlete1_name]);
+                $team1_id = (int)$pFind->fetchColumn() ?: null;
+            }
+            if (!$team2_id && $athlete2_name !== '') {
+                $pFind = $pdo->prepare("SELECT t.id FROM players p JOIN teams t ON t.unit_id = p.unit_id AND t.game_id = ? WHERE p.name = ? LIMIT 1");
+                $pFind->execute([$game_id, $athlete2_name]);
+                $team2_id = (int)$pFind->fetchColumn() ?: null;
+            }
+        }
+
+        $isValid = $isGameOpen ? ($athlete1_name !== '' && $athlete2_name !== '') : ($team1_id > 0 && $team2_id > 0);
+
+        if ($match_id > 0 && $isValid) {
             $stmt = $pdo->prepare("
                 UPDATE matches 
-                SET round = ?, pool_name = ?, team1_id = ?, team2_id = ?, facility_id = ?, 
+                SET round = ?, pool_name = ?, team1_id = ?, team2_id = ?, athlete1_name = ?, athlete2_name = ?, facility_id = ?, 
                     match_date = ?, start_time = ?, end_time = ?, status = ?, is_published = ?
                 WHERE id = ?
             ");
-            $stmt->execute([$round, $pool_name ?: null, $team1_id, $team2_id, $facility_id ?: null, $match_date, $start_time, $end_time, $status, $is_pub, $match_id]);
+            $stmt->execute([$round, $pool_name ?: null, $team1_id, $team2_id, $athlete1_name ?: null, $athlete2_name ?: null, $facility_id, $match_date, $start_time, $end_time, $status, $is_pub, $match_id]);
             log_audit_event($pdo, $_SESSION['user_id'] ?? 1, 'UPDATE_MATCH', "Admin updated details for Match #$match_id");
             $msg = "Match #$match_id details updated successfully.";
             $selectedGameId = $game_id;
         } else {
-            $err = "Invalid match update parameters. Please select both teams.";
+            $err = "Invalid match update parameters. Please provide both teams or athlete names.";
         }
     } elseif ($action === 'delete_match') {
         $match_id = (int)($_POST['match_id'] ?? 0);
@@ -325,14 +394,23 @@ if (!$selectedGameId && !empty($games)) {
     $selectedGameId = $games[0]['id'];
 }
 
+$selectedGame = null;
+foreach ($games as $g) {
+    if ($g['id'] == $selectedGameId) {
+        $selectedGame = $g;
+        break;
+    }
+}
+$isOpenCategory = ($selectedGame && (stripos($selectedGame['name'], 'Open') !== false || ($selectedGame['category'] ?? '') === 'Open Category'));
+
 // Fetch matches for selected game
 $gameMatches = [];
 $isPublished = false;
 if ($selectedGameId > 0) {
     $stmt = $pdo->prepare("
         SELECT m.*, 
-               t1.name as team1_name, u1.short_code as u1_code,
-               t2.name as team2_name, u2.short_code as u2_code,
+               COALESCE(NULLIF(m.athlete1_name, ''), t1.name) as team1_name, u1.short_code as u1_code,
+               COALESCE(NULLIF(m.athlete2_name, ''), t2.name) as team2_name, u2.short_code as u2_code,
                f.name as facility_name
         FROM matches m
         LEFT JOIN teams t1 ON m.team1_id = t1.id
@@ -357,13 +435,23 @@ if ($selectedGameId > 0) {
 // Fetch teams for selected game for pairing adjustment dropdowns
 $gameTeams = [];
 if ($selectedGameId > 0) {
-    $stmt = $pdo->prepare("SELECT t.id, t.name, u.short_code FROM teams t JOIN units u ON t.unit_id = u.id WHERE t.game_id = ? ORDER BY u.short_code ASC");
+    $stmt = $pdo->prepare("SELECT t.id, t.name, t.unit_id, u.short_code FROM teams t JOIN units u ON t.unit_id = u.id WHERE t.game_id = ? ORDER BY u.short_code ASC");
     $stmt->execute([$selectedGameId]);
     $gameTeams = $stmt->fetchAll();
 }
 
 // Fetch facilities for dropdowns
 $allFacilities = $pdo->query("SELECT id, name, type FROM facilities ORDER BY name ASC")->fetchAll();
+
+// Fetch open category registered players for autocomplete datalist
+$openPlayers = $pdo->query("
+    SELECT p.name, u.id as unit_id, u.short_code, t.id as team_id, t.game_id, g.name as game_name 
+    FROM players p 
+    JOIN teams t ON p.team_id = t.id 
+    JOIN units u ON p.unit_id = u.id 
+    JOIN games g ON t.game_id = g.id 
+    ORDER BY p.name ASC
+")->fetchAll();
 ?>
 
 <div class="content-header">
@@ -510,7 +598,7 @@ $allFacilities = $pdo->query("SELECT id, name, type FROM facilities ORDER BY nam
                   <tr>
                     <th>Match</th>
                     <th>Round / Stage</th>
-                    <th>Team 1 vs Team 2</th>
+                    <th><?= $isOpenCategory ? 'Athlete 1 vs Athlete 2' : 'Team 1 vs Team 2' ?></th>
                     <th>Schedule & Venue</th>
                     <th>Status</th>
                     <th class="text-right">Actions</th>
@@ -542,11 +630,15 @@ $allFacilities = $pdo->query("SELECT id, name, type FROM facilities ORDER BY nam
                       </td>
                       <td class="align-middle">
                         <div class="d-flex align-items-center">
-                          <span class="badge badge-dark mr-1" style="min-width: 32px;"><?= htmlspecialchars($gm['u1_code'] ?: 'T1') ?></span>
-                          <span class="font-weight-bold mr-2 text-truncate" style="max-width: 130px;"><?= htmlspecialchars($gm['team1_name'] ?: 'Team 1') ?></span>
+                          <?php if (!empty($gm['u1_code'])): ?>
+                            <span class="badge badge-dark mr-1" style="min-width: 32px;"><?= htmlspecialchars($gm['u1_code']) ?></span>
+                          <?php endif; ?>
+                          <span class="font-weight-bold mr-2 text-truncate" style="max-width: 140px;"><?= htmlspecialchars($gm['team1_name'] ?: ($gm['athlete1_name'] ?: 'Athlete 1')) ?></span>
                           <span class="text-muted font-weight-bold mx-1">vs</span>
-                          <span class="badge badge-dark mr-1" style="min-width: 32px;"><?= htmlspecialchars($gm['u2_code'] ?: 'T2') ?></span>
-                          <span class="font-weight-bold text-truncate" style="max-width: 130px;"><?= htmlspecialchars($gm['team2_name'] ?: 'Team 2') ?></span>
+                          <?php if (!empty($gm['u2_code'])): ?>
+                            <span class="badge badge-dark mr-1" style="min-width: 32px;"><?= htmlspecialchars($gm['u2_code']) ?></span>
+                          <?php endif; ?>
+                          <span class="font-weight-bold text-truncate" style="max-width: 140px;"><?= htmlspecialchars($gm['team2_name'] ?: ($gm['athlete2_name'] ?: 'Athlete 2')) ?></span>
                         </div>
                       </td>
                       <td class="align-middle small">
@@ -575,6 +667,8 @@ $allFacilities = $pdo->query("SELECT id, name, type FROM facilities ORDER BY nam
                                     "pool_name" => $gm["pool_name"] ?? "",
                                     "team1_id" => $gm["team1_id"],
                                     "team2_id" => $gm["team2_id"],
+                                    "athlete1_name" => $gm["athlete1_name"] ?? "",
+                                    "athlete2_name" => $gm["athlete2_name"] ?? "",
                                     "facility_id" => $gm["facility_id"] ?? 0,
                                     "match_date" => $gm["match_date"],
                                     "start_time" => substr($gm["start_time"], 0, 5),
@@ -582,7 +676,7 @@ $allFacilities = $pdo->query("SELECT id, name, type FROM facilities ORDER BY nam
                                     "status" => $gm["status"],
                                     "is_published" => (int)$gm["is_published"]
                                 ], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>)'
-                                title="Edit Match, Round, Teams, Venue & Schedule">
+                                title="Edit Match, Round, Competitors, Venue & Schedule">
                           <i class="fas fa-edit"></i> Edit
                         </button>
 
@@ -609,13 +703,20 @@ $allFacilities = $pdo->query("SELECT id, name, type FROM facilities ORDER BY nam
   </div>
 </div>
 
+<!-- Registered Athletes Datalist for Autocomplete Suggestions -->
+<datalist id="openPlayersDatalist">
+  <?php foreach ($openPlayers as $op): ?>
+    <option value="<?= htmlspecialchars($op['name']) ?>" data-unit-id="<?= $op['unit_id'] ?>" data-code="<?= htmlspecialchars($op['short_code']) ?>">[<?= htmlspecialchars($op['short_code']) ?>] <?= htmlspecialchars($op['name']) ?> (<?= htmlspecialchars($op['game_name']) ?>)</option>
+  <?php endforeach; ?>
+</datalist>
+
 <!-- ========================================== -->
 <!-- MODAL 1: CREATE MATCH MANUALLY             -->
 <!-- ========================================== -->
 <div class="modal fade" id="createMatchModal" tabindex="-1" role="dialog" aria-hidden="true">
   <div class="modal-dialog modal-lg" role="document">
     <div class="modal-content">
-      <form method="POST">
+      <form method="POST" id="createMatchForm">
         <input type="hidden" name="action" value="create_match">
         <div class="modal-header bg-primary text-white">
           <h5 class="modal-title font-weight-bold">
@@ -627,9 +728,9 @@ $allFacilities = $pdo->query("SELECT id, name, type FROM facilities ORDER BY nam
           <div class="row">
             <div class="col-md-6 form-group">
               <label>Discipline / Sport <span class="text-danger">*</span></label>
-              <select name="game_id" class="form-control" required onchange="window.location.href='<?= BASE_URL ?>/admin/draws?game_id=' + this.value">
+              <select name="game_id" id="create_game_id" class="form-control" required onchange="onGameSelectChange(this.value)">
                 <?php foreach ($games as $g): ?>
-                  <option value="<?= $g['id'] ?>" <?= $selectedGameId == $g['id'] ? 'selected' : '' ?>>
+                  <option value="<?= $g['id'] ?>" <?= $selectedGameId == $g['id'] ? 'selected' : '' ?> data-open="<?= (stripos($g['name'], 'Open') !== false || ($g['category'] ?? '') === 'Open Category') ? '1' : '0' ?>">
                     <?= htmlspecialchars($g['name']) ?> (<?= htmlspecialchars($g['category']) ?>)
                   </option>
                 <?php endforeach; ?>
@@ -637,28 +738,11 @@ $allFacilities = $pdo->query("SELECT id, name, type FROM facilities ORDER BY nam
             </div>
             <div class="col-md-3 form-group">
               <label>Round / Stage <span class="text-danger">*</span></label>
-              <input type="text" name="round" list="roundSuggestions" class="form-control" placeholder="e.g. Pool A - Round 1, or 50m Freestyle" required>
+              <input type="text" name="round" list="roundSuggestions" class="form-control" placeholder="e.g. Round 1, Quarterfinal, Semifinal" required>
               <datalist id="roundSuggestions">
-                <option value="Pool A - Round 1">
-                <option value="Pool A - Round 2">
-                <option value="Pool A - Round 3">
-                <option value="Pool A - Round 4">
-                <option value="Pool A - Round 5">
-                <option value="Pool B - Round 1">
-                <option value="Pool B - Round 2">
-                <option value="Pool B - Round 3">
-                <option value="Pool B - Round 4">
-                <option value="Pool B - Round 5">
-                <option value="Swiss Round 1">
-                <option value="Swiss Round 2">
-                <option value="Swiss Round 3">
-                <option value="Swiss Round 4">
-                <option value="Swiss Round 5">
-                <option value="Session 1">
-                <option value="Session 2">
-                <option value="Session 3">
-                <option value="Round 1 (Pre-QF 1)">
-                <option value="Round 1 (Pre-QF 2)">
+                <option value="Round 1">
+                <option value="Round 2">
+                <option value="Round of 16">
                 <option value="Quarterfinal 1">
                 <option value="Quarterfinal 2">
                 <option value="Quarterfinal 3">
@@ -667,14 +751,10 @@ $allFacilities = $pdo->query("SELECT id, name, type FROM facilities ORDER BY nam
                 <option value="Semifinal 2">
                 <option value="3rd Place Playoff (Bronze Medal)">
                 <option value="Grand Final (Gold Medal)">
-                <option value="50m Freestyle - Heat 1">
-                <option value="50m Freestyle - Heat 2">
-                <option value="50m Freestyle - Final">
-                <option value="100m Breaststroke - Heat 1">
-                <option value="100m Breaststroke - Final">
-                <option value="50m Backstroke - Final">
-                <option value="50m Butterfly - Final">
-                <option value="4x50m Freestyle Relay - Final">
+                <option value="Pool A - Round 1">
+                <option value="Pool A - Round 2">
+                <option value="Pool B - Round 1">
+                <option value="Pool B - Round 2">
                 <option value="Exhibition Match">
               </datalist>
             </div>
@@ -684,22 +764,19 @@ $allFacilities = $pdo->query("SELECT id, name, type FROM facilities ORDER BY nam
                 <option value="">None / Knockout</option>
                 <option value="A">Pool A</option>
                 <option value="B">Pool B</option>
-                <option value="C">Pool C</option>
-                <option value="D">Pool D</option>
-                <option value="Knockout">Knockout</option>
-                <option value="Swiss League">Swiss League</option>
-                <option value="All Zones">All Zones (Swimming)</option>
+                <option value="Knockout">Knockout Bracket</option>
               </select>
             </div>
           </div>
 
-          <div class="row bg-light p-2 rounded mb-3 border">
+          <!-- Section A: Standard Team Selection (for Team Events) -->
+          <div id="createTeamFields" class="row bg-light p-2 rounded mb-3 border <?= $isOpenCategory ? 'd-none' : '' ?>">
             <div class="col-md-6 form-group mb-0">
               <label><i class="fas fa-shield-alt text-primary mr-1"></i> Team 1 <span class="text-danger">*</span></label>
-              <select name="team1_id" class="form-control font-weight-bold" required>
+              <select name="team1_id" id="createTeam1Select" class="form-control font-weight-bold" <?= $isOpenCategory ? '' : 'required' ?>>
                 <option value="">-- Select Team 1 --</option>
                 <?php foreach ($gameTeams as $gt): ?>
-                  <option value="<?= $gt['id'] ?>">
+                  <option value="<?= $gt['id'] ?>" data-unit-id="<?= $gt['unit_id'] ?>" data-code="<?= htmlspecialchars($gt['short_code']) ?>">
                     [<?= htmlspecialchars($gt['short_code']) ?>] <?= htmlspecialchars($gt['name']) ?>
                   </option>
                 <?php endforeach; ?>
@@ -707,14 +784,55 @@ $allFacilities = $pdo->query("SELECT id, name, type FROM facilities ORDER BY nam
             </div>
             <div class="col-md-6 form-group mb-0">
               <label><i class="fas fa-shield-alt text-danger mr-1"></i> Team 2 <span class="text-danger">*</span></label>
-              <select name="team2_id" class="form-control font-weight-bold" required>
+              <select name="team2_id" id="createTeam2Select" class="form-control font-weight-bold" <?= $isOpenCategory ? '' : 'required' ?>>
                 <option value="">-- Select Team 2 --</option>
                 <?php foreach ($gameTeams as $gt): ?>
-                  <option value="<?= $gt['id'] ?>">
+                  <option value="<?= $gt['id'] ?>" data-unit-id="<?= $gt['unit_id'] ?>" data-code="<?= htmlspecialchars($gt['short_code']) ?>">
                     [<?= htmlspecialchars($gt['short_code']) ?>] <?= htmlspecialchars($gt['name']) ?>
                   </option>
                 <?php endforeach; ?>
               </select>
+            </div>
+          </div>
+
+          <!-- Section B: Manual Athlete Name Entry (for Badminton & Table Tennis Open Categories) -->
+          <div id="createAthleteFields" class="row bg-warning bg-opacity-10 p-2 rounded mb-3 border border-warning <?= $isOpenCategory ? '' : 'd-none' ?>" style="background-color: #fff9e6;">
+            <div class="col-12 mb-2 d-flex justify-content-between align-items-center">
+              <div>
+                <span class="badge badge-warning text-dark font-weight-bold"><i class="fas fa-user-edit mr-1"></i> Open Category Draw: Individual Athletes</span>
+                <small class="text-dark ml-2">Enter manual athlete competitor names below. Athlete names will appear across Volunteer App and Dashboards.</small>
+              </div>
+              <span class="badge badge-primary font-weight-bold">Best of 5 Format</span>
+            </div>
+            <div class="col-md-6">
+              <div class="card card-outline card-primary mb-0">
+                <div class="card-body p-2">
+                  <label class="font-weight-bold text-primary mb-1"><i class="fas fa-user mr-1"></i> Athlete 1 Name <span class="text-danger">*</span></label>
+                  <input type="text" name="athlete1_name" id="createAthlete1Input" class="form-control font-weight-bold mb-2" placeholder="Enter athlete name (e.g. KUMAR MANGLAM)" list="openPlayersDatalist" oninput="autoMatchUnit(this, 'createTeam1OpenSelect')" onchange="autoMatchUnit(this, 'createTeam1OpenSelect')">
+                  <label class="small text-muted font-weight-bold mb-1">Representing Unit / Zone (Optional)</label>
+                  <select name="team1_id_open" id="createTeam1OpenSelect" class="form-control form-control-sm">
+                    <option value="">-- Auto-Detect / Select Zone --</option>
+                    <?php foreach ($gameTeams as $gt): ?>
+                      <option value="<?= $gt['id'] ?>" data-unit-id="<?= $gt['unit_id'] ?>" data-code="<?= htmlspecialchars($gt['short_code']) ?>">[<?= htmlspecialchars($gt['short_code']) ?>] <?= htmlspecialchars($gt['name']) ?></option>
+                    <?php endforeach; ?>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="card card-outline card-danger mb-0">
+                <div class="card-body p-2">
+                  <label class="font-weight-bold text-danger mb-1"><i class="fas fa-user mr-1"></i> Athlete 2 Name <span class="text-danger">*</span></label>
+                  <input type="text" name="athlete2_name" id="createAthlete2Input" class="form-control font-weight-bold mb-2" placeholder="Enter athlete name (e.g. SALAPU VARDHAN)" list="openPlayersDatalist" oninput="autoMatchUnit(this, 'createTeam2OpenSelect')" onchange="autoMatchUnit(this, 'createTeam2OpenSelect')">
+                  <label class="small text-muted font-weight-bold mb-1">Representing Unit / Zone (Optional)</label>
+                  <select name="team2_id_open" id="createTeam2OpenSelect" class="form-control form-control-sm">
+                    <option value="">-- Auto-Detect / Select Zone --</option>
+                    <?php foreach ($gameTeams as $gt): ?>
+                      <option value="<?= $gt['id'] ?>" data-unit-id="<?= $gt['unit_id'] ?>" data-code="<?= htmlspecialchars($gt['short_code']) ?>">[<?= htmlspecialchars($gt['short_code']) ?>] <?= htmlspecialchars($gt['name']) ?></option>
+                    <?php endforeach; ?>
+                  </select>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -793,35 +911,50 @@ $allFacilities = $pdo->query("SELECT id, name, type FROM facilities ORDER BY nam
                 <option value="">None / Knockout</option>
                 <option value="A">Pool A</option>
                 <option value="B">Pool B</option>
-                <option value="C">Pool C</option>
-                <option value="D">Pool D</option>
-                <option value="Knockout">Knockout</option>
-                <option value="Swiss League">Swiss League</option>
-                <option value="All Zones">All Zones (Swimming)</option>
+                <option value="Knockout">Knockout Bracket</option>
               </select>
             </div>
           </div>
 
-          <div class="row bg-light p-2 rounded mb-3 border">
+          <!-- Section A: Standard Team Selection -->
+          <div id="editTeamFields" class="row bg-light p-2 rounded mb-3 border">
             <div class="col-md-6 form-group mb-0">
-              <label><i class="fas fa-shield-alt text-primary mr-1"></i> Team 1 <span class="text-danger">*</span></label>
-              <select name="team1_id" id="edit_team1_id" class="form-control font-weight-bold" required>
+              <label><i class="fas fa-shield-alt text-primary mr-1"></i> Team 1</label>
+              <select name="team1_id" id="edit_team1_id" class="form-control font-weight-bold">
+                <option value="">-- Not Assigned / Individual --</option>
                 <?php foreach ($gameTeams as $gt): ?>
-                  <option value="<?= $gt['id'] ?>">
+                  <option value="<?= $gt['id'] ?>" data-unit-id="<?= $gt['unit_id'] ?>" data-code="<?= htmlspecialchars($gt['short_code']) ?>">
                     [<?= htmlspecialchars($gt['short_code']) ?>] <?= htmlspecialchars($gt['name']) ?>
                   </option>
                 <?php endforeach; ?>
               </select>
             </div>
             <div class="col-md-6 form-group mb-0">
-              <label><i class="fas fa-shield-alt text-danger mr-1"></i> Team 2 <span class="text-danger">*</span></label>
-              <select name="team2_id" id="edit_team2_id" class="form-control font-weight-bold" required>
+              <label><i class="fas fa-shield-alt text-danger mr-1"></i> Team 2</label>
+              <select name="team2_id" id="edit_team2_id" class="form-control font-weight-bold">
+                <option value="">-- Not Assigned / Individual --</option>
                 <?php foreach ($gameTeams as $gt): ?>
-                  <option value="<?= $gt['id'] ?>">
+                  <option value="<?= $gt['id'] ?>" data-unit-id="<?= $gt['unit_id'] ?>" data-code="<?= htmlspecialchars($gt['short_code']) ?>">
                     [<?= htmlspecialchars($gt['short_code']) ?>] <?= htmlspecialchars($gt['name']) ?>
                   </option>
                 <?php endforeach; ?>
               </select>
+            </div>
+          </div>
+
+          <!-- Section B: Edit Athlete Name (for Open Categories) -->
+          <div id="editAthleteFields" class="row bg-warning bg-opacity-10 p-2 rounded mb-3 border border-warning" style="background-color: #fff9e6;">
+            <div class="col-12 mb-2">
+              <span class="badge badge-warning text-dark font-weight-bold"><i class="fas fa-user-edit mr-1"></i> Competitor Athlete Names</span>
+              <small class="text-muted ml-2">For Open Category matches, customize athlete names manually.</small>
+            </div>
+            <div class="col-md-6 form-group">
+              <label class="font-weight-bold text-primary"><i class="fas fa-user mr-1"></i> Athlete 1 Name</label>
+              <input type="text" name="athlete1_name" id="edit_athlete1_name" class="form-control font-weight-bold" placeholder="e.g. KUMAR MANGLAM" list="openPlayersDatalist" oninput="autoMatchUnit(this, 'edit_team1_id')" onchange="autoMatchUnit(this, 'edit_team1_id')">
+            </div>
+            <div class="col-md-6 form-group">
+              <label class="font-weight-bold text-danger"><i class="fas fa-user mr-1"></i> Athlete 2 Name</label>
+              <input type="text" name="athlete2_name" id="edit_athlete2_name" class="form-control font-weight-bold" placeholder="e.g. SALAPU VARDHAN" list="openPlayersDatalist" oninput="autoMatchUnit(this, 'edit_team2_id')" onchange="autoMatchUnit(this, 'edit_team2_id')">
             </div>
           </div>
 
@@ -880,19 +1013,91 @@ $allFacilities = $pdo->query("SELECT id, name, type FROM facilities ORDER BY nam
 </div>
 
 <script>
+function onGameSelectChange(gameId) {
+  // If changing to another game, reload with game_id to load correct teams and facilities
+  window.location.href = '<?= BASE_URL ?>/admin/draws?game_id=' + gameId;
+}
+
+function autoMatchUnit(inputEl, selectId) {
+  if (!inputEl) return;
+  const val = (inputEl.value || '').trim().toLowerCase();
+  const datalist = document.getElementById('openPlayersDatalist');
+  const select = document.getElementById(selectId);
+  if (!datalist || !select || !val) return;
+
+  // 1. Try finding exact match by player name
+  let option = Array.from(datalist.options).find(o => o.value.trim().toLowerCase() === val);
+  
+  // 2. If not found, try finding by option text contains name
+  if (!option) {
+    option = Array.from(datalist.options).find(o => o.text.toLowerCase().includes(val));
+  }
+
+  if (option) {
+    const unitId = option.getAttribute('data-unit-id');
+    const unitCode = (option.getAttribute('data-code') || '').toUpperCase();
+
+    // 1. Try matching select option by data-unit-id
+    let matchedOpt = null;
+    if (unitId) {
+      matchedOpt = Array.from(select.options).find(o => o.getAttribute('data-unit-id') == unitId);
+    }
+    // 2. Try matching select option by data-code
+    if (!matchedOpt && unitCode) {
+      matchedOpt = Array.from(select.options).find(o => (o.getAttribute('data-code') || '').toUpperCase() === unitCode);
+    }
+    // 3. Try matching select option by short code bracket [SCZ] in text
+    if (!matchedOpt && unitCode) {
+      matchedOpt = Array.from(select.options).find(o => o.text.includes('[' + unitCode + ']'));
+    }
+
+    if (matchedOpt) {
+      select.value = matchedOpt.value;
+      // Visual feedback: green glow to confirm auto-match
+      select.style.borderColor = '#28a745';
+      select.style.boxShadow = '0 0 0 0.2rem rgba(40, 167, 69, 0.25)';
+      setTimeout(() => {
+        select.style.borderColor = '';
+        select.style.boxShadow = '';
+      }, 1500);
+    }
+  }
+}
+
+// Sync athlete open team dropdowns to team1_id and team2_id before submission if present
+document.getElementById('createMatchForm')?.addEventListener('submit', function() {
+  const isOpen = <?= $isOpenCategory ? 'true' : 'false' ?>;
+  if (isOpen) {
+    const t1Open = document.getElementById('createTeam1OpenSelect')?.value;
+    const t2Open = document.getElementById('createTeam2OpenSelect')?.value;
+    const t1Sel = document.getElementById('createTeam1Select');
+    const t2Sel = document.getElementById('createTeam2Select');
+    if (t1Sel && t1Open) t1Sel.value = t1Open;
+    if (t2Sel && t2Open) t2Sel.value = t2Open;
+  }
+});
+
 function openEditMatchModal(data) {
   document.getElementById('edit_match_id').value = data.id;
   document.getElementById('edit_match_id_display').innerText = '#' + data.id;
   document.getElementById('edit_round').value = data.round;
   document.getElementById('edit_pool_name').value = data.pool_name || '';
-  document.getElementById('edit_team1_id').value = data.team1_id;
-  document.getElementById('edit_team2_id').value = data.team2_id;
+  document.getElementById('edit_team1_id').value = data.team1_id || '';
+  document.getElementById('edit_team2_id').value = data.team2_id || '';
+  document.getElementById('edit_athlete1_name').value = data.athlete1_name || '';
+  document.getElementById('edit_athlete2_name').value = data.athlete2_name || '';
   document.getElementById('edit_facility_id').value = data.facility_id || '';
   document.getElementById('edit_match_date').value = data.match_date;
   document.getElementById('edit_start_time').value = data.start_time;
   document.getElementById('edit_end_time').value = data.end_time;
   document.getElementById('edit_status').value = data.status || 'scheduled';
   document.getElementById('edit_is_published').checked = !!data.is_published;
+
+  const isAthleteMatch = !!(data.athlete1_name || data.athlete2_name || <?= $isOpenCategory ? 'true' : 'false' ?>);
+  const editAthleteFields = document.getElementById('editAthleteFields');
+  if (editAthleteFields) {
+    editAthleteFields.classList.toggle('d-none', !isAthleteMatch);
+  }
 
   $('#editMatchModal').modal('show');
 }

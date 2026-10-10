@@ -22,9 +22,15 @@ $allGames = $pdo->query("SELECT id, name, slug, icon, category FROM games ORDER 
 // Fetch matches for this game
 $stmt = $pdo->prepare("
     SELECT m.*, 
-           t1.name as team1_name, u1.short_code as u1_code, u1.color_code as u1_color,
-           t2.name as team2_name, u2.short_code as u2_code, u2.color_code as u2_color,
-           tw.name as winner_name,
+           COALESCE(NULLIF(m.athlete1_name, ''), t1.name) as team1_name, u1.short_code as u1_code, u1.color_code as u1_color,
+           COALESCE(NULLIF(m.athlete2_name, ''), t2.name) as team2_name, u2.short_code as u2_code, u2.color_code as u2_color,
+           COALESCE(
+               CASE 
+                   WHEN m.winner_id = m.team1_id AND m.athlete1_name IS NOT NULL AND m.athlete1_name != '' THEN m.athlete1_name
+                   WHEN m.winner_id = m.team2_id AND m.athlete2_name IS NOT NULL AND m.athlete2_name != '' THEN m.athlete2_name
+                   ELSE tw.name
+               END
+           ) as winner_name,
            f.name as facility_name, f.location
     FROM matches m
     LEFT JOIN teams t1 ON m.team1_id = t1.id

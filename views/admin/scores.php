@@ -140,9 +140,15 @@ $allScoreFormats = $pdo->query("SELECT * FROM score_formats ORDER BY name ASC")-
 $matches = $pdo->query("
     SELECT m.*, 
            g.name as game_name, g.slug as game_slug, g.category,
-           t1.id as t1_id, t1.name as team1_name, u1.short_code as u1_code, u1.color_code as u1_color,
-           t2.id as t2_id, t2.name as team2_name, u2.short_code as u2_code, u2.color_code as u2_color,
-           tw.name as winner_name, tw.id as win_id,
+           t1.id as t1_id, COALESCE(NULLIF(m.athlete1_name, ''), t1.name) as team1_name, u1.short_code as u1_code, u1.color_code as u1_color,
+           t2.id as t2_id, COALESCE(NULLIF(m.athlete2_name, ''), t2.name) as team2_name, u2.short_code as u2_code, u2.color_code as u2_color,
+           COALESCE(
+               CASE 
+                   WHEN m.winner_id = m.team1_id AND m.athlete1_name IS NOT NULL AND m.athlete1_name != '' THEN m.athlete1_name
+                   WHEN m.winner_id = m.team2_id AND m.athlete2_name IS NOT NULL AND m.athlete2_name != '' THEN m.athlete2_name
+                   ELSE tw.name
+               END
+           ) as winner_name, tw.id as win_id,
            f.name as facility_name,
            sf.name as format_name, sf.badge_text as format_badge, sf.columns_json, sf.total_columns
     FROM matches m
@@ -654,8 +660,9 @@ function openEditScoreModal(data) {
     document.getElementById('btt_g5_b').value = scores.g5_b ?? '';
 
     var isTT = (data.game_slug && data.game_slug.indexOf('table-tennis') !== -1) || (data.game_name && data.game_name.toLowerCase().indexOf('table tennis') !== -1);
+    var isOpenCategory = (data.category === 'Open Category' || (data.game_slug && data.game_slug.indexOf('open') !== -1) || (data.game_name && data.game_name.toLowerCase().indexOf('open') !== -1));
     var isWomen = (data.round && data.round.toLowerCase().indexOf('women') !== -1);
-    var isBestOf5 = (data.total_columns == 5) || (data.score_format_id == 1) || ((isTT && !isWomen) && data.score_format_id != 2) || (scores.g4_a !== undefined && scores.g4_a !== '' && scores.g4_a !== null) || (scores.g5_a !== undefined && scores.g5_a !== '' && scores.g5_a !== null) || !!scores.is_best_of_5;
+    var isBestOf5 = isOpenCategory || (data.total_columns == 5) || (data.score_format_id == 1) || ((isTT && !isWomen) && data.score_format_id != 2) || (scores.g4_a !== undefined && scores.g4_a !== '' && scores.g4_a !== null) || (scores.g5_a !== undefined && scores.g5_a !== '' && scores.g5_a !== null) || !!scores.is_best_of_5;
 
     document.getElementById('btt_is_best_of_5').value = isBestOf5 ? '1' : '0';
 
@@ -663,7 +670,12 @@ function openEditScoreModal(data) {
     var title = document.getElementById('btt_subform_title');
     var extraCols = document.querySelectorAll('.btt-extra-game');
 
-    if (isBestOf5) {
+    if (isOpenCategory) {
+      badge.className = 'badge badge-warning px-2 py-1 font-weight-bold text-dark';
+      badge.innerText = 'Best of 5 Games (First to 3)';
+      title.innerHTML = '<i class="fas fa-medal mr-1 text-warning"></i> Open Category (' + data.game_name + ' - Best of 5 Games)';
+      extraCols.forEach(function(el) { el.style.display = ''; });
+    } else if (isBestOf5) {
       badge.className = 'badge badge-primary px-2 py-1 font-weight-bold';
       badge.innerText = data.format_badge || 'Best of 5 Games (First to 3)';
       title.innerHTML = '<i class="fas fa-table-tennis mr-1"></i> Table Tennis Men (Best of 5 Games to 11 Pts)';
