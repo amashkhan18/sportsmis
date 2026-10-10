@@ -49,4 +49,4 @@ DELETE FROM master_events WHERE date = '2026-10-10' AND event_name LIKE '%Relay%
 INSERT INTO master_events (event_name, event_type, date, start_time, end_time, location, description)
 VALUES 
 ('2 X 50m Freestyle Relay (Men) - Final', 'match', '2026-10-10', '10:00:00', '10:30:00', 'Aquatic Complex - Balewadi', 'Men Relay Final - 11 Teams'),
-('2 X 50m Freestyle Relay (Women) - Final', 'match', '2026-10-10', '10:30:00', 'Aquatic Complex - Balewadi', 'Women Relay Final - 3 Teams');
+('2 X 50m Freestyle Relay (Women) - Final', 'match', '2026-10-10', '10:30:00', '11:00:00', 'Aquatic Complex - Balewadi', 'Women Relay Final - 3 Teams');
