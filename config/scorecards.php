@@ -193,8 +193,8 @@ function render_digital_scorecard($m, $scores = null, $sportType = null) {
     $type = $sportType ?: ($scores['type'] ?? get_scorecard_type($gameSlug));
     $summary = format_score_summary($scores, $type);
 
-    $t1Name = htmlspecialchars($m['team1_name'] ?: 'Team A');
-    $t2Name = htmlspecialchars($m['team2_name'] ?: 'Team B');
+    $t1Name = htmlspecialchars($m['team1_name'] ?? 'Team A');
+    $t2Name = htmlspecialchars($m['team2_name'] ?? 'Team B');
     $u1Code = htmlspecialchars($m['u1_code'] ?? 'T1');
     $u2Code = htmlspecialchars($m['u2_code'] ?? 'T2');
     $u1Color = htmlspecialchars($m['u1_color'] ?? '#0d6efd');
@@ -580,7 +580,9 @@ function render_digital_scorecard($m, $scores = null, $sportType = null) {
                                     <?php 
                                         if (empty($lane['swimmer']) && empty($lane['time'])) continue;
                                         $status = $lane['status'] ?? 'NORMAL';
-                                        $pos = $lane['position'] ?? '-';
+                                        $posStr = strtolower(trim($lane['position'] ?? ($lane['pos'] ?? '-')));
+                                        preg_match('/^(\d+)/', $posStr, $pMatches);
+                                        $rankNum = isset($pMatches[1]) ? (int)$pMatches[1] : ($posStr === 'i' ? 1 : ($posStr === 'ii' ? 2 : ($posStr === 'iii' ? 3 : 0)));
                                     ?>
                                     <tr>
                                         <td class="text-muted fw-bold"><?= htmlspecialchars($lane['lane'] ?? '') ?></td>
@@ -596,14 +598,14 @@ function render_digital_scorecard($m, $scores = null, $sportType = null) {
                                                 <span class="badge bg-secondary" style="font-size: 0.65rem;">DNS</span>
                                             <?php elseif ($status === 'DSQ'): ?>
                                                 <span class="badge bg-danger" style="font-size: 0.65rem;">DSQ</span>
-                                            <?php elseif (strpos($pos, '1') === 0): ?>
+                                            <?php elseif ($rankNum === 1): ?>
                                                 <span class="badge bg-warning text-dark fw-bold" style="font-size: 0.65rem;"><i class="fas fa-medal me-1"></i>1st</span>
-                                            <?php elseif (strpos($pos, '2') === 0): ?>
+                                            <?php elseif ($rankNum === 2): ?>
                                                 <span class="badge bg-light text-dark fw-bold" style="font-size: 0.65rem;">2nd</span>
-                                            <?php elseif (strpos($pos, '3') === 0): ?>
+                                            <?php elseif ($rankNum === 3): ?>
                                                 <span class="badge bg-warning-subtle text-dark fw-bold" style="font-size: 0.65rem;">3rd</span>
                                             <?php else: ?>
-                                                <span class="text-muted"><?= htmlspecialchars($pos) ?></span>
+                                                <span class="text-muted"><?= htmlspecialchars($lane['position'] ?? ($lane['pos'] ?? $posStr)) ?></span>
                                             <?php endif; ?>
                                         </td>
                                     </tr>
@@ -670,14 +672,16 @@ function get_swimming_discipline_standings($pdo, $gameId) {
                 $baseZone = trim(preg_replace('/[\s\-_]+[AB]$/i', '', $zone));
                 $matchedZone = isset($standings[$zone]) ? $zone : (isset($standings[$baseZone]) ? $baseZone : null);
                 $pos = strtolower(trim($l['position'] ?? ($l['pos'] ?? '')));
+                preg_match('/^(\d+)/', $pos, $pMatches);
+                $rankNum = isset($pMatches[1]) ? (int)$pMatches[1] : ($pos === 'i' ? 1 : ($pos === 'ii' ? 2 : ($pos === 'iii' ? 3 : 0)));
                 if ($matchedZone) {
-                    if (strpos($pos, '1') === 0) {
+                    if ($rankNum === 1) {
                         $standings[$matchedZone]['gold']++;
                         $standings[$matchedZone]['points'] += 5;
-                    } elseif (strpos($pos, '2') === 0) {
+                    } elseif ($rankNum === 2) {
                         $standings[$matchedZone]['silver']++;
                         $standings[$matchedZone]['points'] += 3;
-                    } elseif (strpos($pos, '3') === 0) {
+                    } elseif ($rankNum === 3) {
                         $standings[$matchedZone]['bronze']++;
                         $standings[$matchedZone]['points'] += 1;
                     }

@@ -198,20 +198,22 @@ function get_overall_championship_leaderboard($pdo, $forceMode = null) {
         if (!empty($lanes)) {
             foreach ($lanes as $l) {
                 $pos = strtolower(trim($l['pos'] ?? ($l['position'] ?? '')));
+                preg_match('/^(\d+)/', $pos, $pMatches);
+                $rankNum = isset($pMatches[1]) ? (int)$pMatches[1] : ($pos === 'i' ? 1 : ($pos === 'ii' ? 2 : ($pos === 'iii' ? 3 : 0)));
                 $pUnit = $resolveUnit($l['zone'] ?? '');
                 if (!$pUnit || !isset($leaderboard[$pUnit])) continue;
 
-                if (strpos($pos, '1') === 0) {
+                if ($rankNum === 1) {
                     $pts = $pointsMap[1] ?? 5;
                     $leaderboard[$pUnit]['gold']++;
                     $leaderboard[$pUnit]['total_points'] += $pts;
                     $leaderboard[$pUnit]['game_breakdown'][] = "Swimming {$m['round']} (1st: +$pts pts)";
-                } elseif (strpos($pos, '2') === 0) {
+                } elseif ($rankNum === 2) {
                     $pts = $pointsMap[2] ?? 3;
                     $leaderboard[$pUnit]['silver']++;
                     $leaderboard[$pUnit]['total_points'] += $pts;
                     $leaderboard[$pUnit]['game_breakdown'][] = "Swimming {$m['round']} (2nd: +$pts pts)";
-                } elseif (strpos($pos, '3') === 0) {
+                } elseif ($rankNum === 3) {
                     $pts = $pointsMap[3] ?? 1;
                     $leaderboard[$pUnit]['bronze']++;
                     $leaderboard[$pUnit]['total_points'] += $pts;
