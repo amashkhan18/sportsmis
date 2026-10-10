@@ -667,17 +667,19 @@ function get_swimming_discipline_standings($pdo, $gameId) {
         if (!empty($lanes)) {
             foreach ($lanes as $l) {
                 $zone = strtoupper(trim($l['zone'] ?? ''));
+                $baseZone = trim(preg_replace('/[\s\-_]+[AB]$/i', '', $zone));
+                $matchedZone = isset($standings[$zone]) ? $zone : (isset($standings[$baseZone]) ? $baseZone : null);
                 $pos = strtolower(trim($l['position'] ?? ($l['pos'] ?? '')));
-                if (isset($standings[$zone])) {
+                if ($matchedZone) {
                     if (strpos($pos, '1') === 0) {
-                        $standings[$zone]['gold']++;
-                        $standings[$zone]['points'] += 5;
+                        $standings[$matchedZone]['gold']++;
+                        $standings[$matchedZone]['points'] += 5;
                     } elseif (strpos($pos, '2') === 0) {
-                        $standings[$zone]['silver']++;
-                        $standings[$zone]['points'] += 3;
+                        $standings[$matchedZone]['silver']++;
+                        $standings[$matchedZone]['points'] += 3;
                     } elseif (strpos($pos, '3') === 0) {
-                        $standings[$zone]['bronze']++;
-                        $standings[$zone]['points'] += 1;
+                        $standings[$matchedZone]['bronze']++;
+                        $standings[$matchedZone]['points'] += 1;
                     }
                 }
             }

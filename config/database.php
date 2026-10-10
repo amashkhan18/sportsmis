@@ -50,6 +50,24 @@ try {
     } catch (Exception $e) {
         // Suppress migration errors if already present or restricted
     }
+
+    // Auto-migration safeguard for swimming relay matches
+    try {
+        $rCheck = $pdo->query("SELECT COUNT(*) FROM matches WHERE game_id = 781 AND round LIKE '%Relay%'")->fetchColumn();
+        if ($rCheck == 0) {
+            $sqlFile = __DIR__ . '/../database/insert_swimming_relay_results.sql';
+            if (file_exists($sqlFile)) {
+                $queries = array_filter(array_map('trim', explode(';', file_get_contents($sqlFile))));
+                foreach ($queries as $q) {
+                    if (!empty($q)) {
+                        $pdo->exec($q);
+                    }
+                }
+            }
+        }
+    } catch (Exception $e) {
+        // Suppress migration errors
+    }
 } catch (PDOException $e) {
     die("Database connection failed: " . $e->getMessage());
 }
